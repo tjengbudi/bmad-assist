@@ -165,6 +165,28 @@ class TestConfigTemplate:
         with pytest.raises(ValidationError, match="frozen"):
             template.name = "new-name"  # type: ignore[misc]
 
+    def test_template_with_none_providers(self) -> None:
+        """Test creating a template without providers (full config mode)."""
+        template = ConfigTemplate(
+            name="full-config",
+            description="Full config template",
+            providers=None,
+            raw_config={"config_name": "full-config", "providers": {"master": {}}},
+        )
+        assert template.name == "full-config"
+        assert template.providers is None
+        assert template.raw_config["config_name"] == "full-config"
+
+    def test_template_raw_config_default_empty(self) -> None:
+        """Test raw_config defaults to empty dict."""
+        template = ConfigTemplate(
+            name="test-config",
+            providers=ConfigTemplateProviders(
+                master={"provider": "claude", "model": "opus"},
+            ),
+        )
+        assert template.raw_config == {}
+
 
 class TestVariableResolution:
     """Tests for variable resolution function."""
@@ -427,6 +449,92 @@ providers:
         with pytest.raises(ConfigError, match="is not a file"):
             load_config_template(configs_dir)
 
+    def test_load_full_config_with_config_name(
+        self,
+        write_config: callable,
+    ) -> None:
+        """Test loading a full config with config_name field."""
+        content = """\
+config_name: full-test
+description: "Full config with phase_models"
+
+providers:
+  master:
+    provider: claude-subprocess
+    model: opus
+  multi:
+    - provider: gemini
+      model: gemini-2.5-flash
+
+phase_models:
+  create_story:
+    provider: claude-subprocess
+    model: opus
+
+timeouts:
+  default: 600
+"""
+        path = write_config(content, "full-test.yaml")
+        template = load_config_template(path)
+
+        assert template.name == "full-test"
+        assert template.description == "Full config with phase_models"
+        # Providers extracted for display
+        assert template.providers is not None
+        assert template.providers.master.provider == "claude-subprocess"
+        # raw_config contains all fields
+        assert "phase_models" in template.raw_config
+        assert "timeouts" in template.raw_config
+        assert template.raw_config["config_name"] == "full-test"
+
+    def test_load_full_config_preserves_all_fields(
+        self,
+        write_config: callable,
+    ) -> None:
+        """Test full config raw_config preserves all fields."""
+        content = """\
+config_name: preserved
+providers:
+  master:
+    provider: claude
+    model: opus
+  multi: []
+
+deep_verify:
+  enabled: true
+security_agent:
+  enabled: true
+compiler:
+  source_context:
+    budgets:
+      default: 30000
+"""
+        path = write_config(content, "preserved.yaml")
+        template = load_config_template(path)
+
+        assert "deep_verify" in template.raw_config
+        assert "security_agent" in template.raw_config
+        assert "compiler" in template.raw_config
+
+    def test_load_full_config_without_providers_section(
+        self,
+        write_config: callable,
+    ) -> None:
+        """Test full config without providers section has None providers."""
+        content = """\
+config_name: no-providers
+phase_models:
+  create_story:
+    provider: claude-subprocess
+    model: opus
+"""
+        path = write_config(content, "no-providers.yaml")
+        template = load_config_template(path)
+
+        assert template.name == "no-providers"
+        assert template.providers is None
+        assert "phase_models" in template.raw_config
+
 
 class TestConfigRegistry:
     """Tests for ConfigRegistry class."""
@@ -488,6 +596,26 @@ class TestConfigRegistry:
         names = registry.list()
 
         assert names == ["yaml-file"]
+
+    def test_discover_finds_config_name_files(
+        self,
+        write_config: callable,
+        configs_dir: Path,
+    ) -> None:
+        """Test discovery finds files using config_name field."""
+        write_config(
+            "config_name: full-cfg\nproviders:\n  master:\n    provider: claude\n    model: opus\n  multi: []\nphase_models:\n  create_story:\n    provider: claude\n    model: opus",
+            "full-cfg.yaml",
+        )
+        write_config(
+            "name: legacy-cfg\nproviders:\n  master:\n    provider: claude\n    model: opus\n  multi: []",
+            "legacy-cfg.yaml",
+        )
+
+        registry = ConfigRegistry(configs_dir)
+        names = registry.list()
+
+        assert sorted(names) == ["full-cfg", "legacy-cfg"]
 
     def test_discover_skips_name_mismatch(
         self,
@@ -719,6 +847,7 @@ class TestDefaultTemplates:
             "haiku-solo",
             "opus-full",
             "opus-glm-gemini",
+            "opus-haiku-gemini-glm",
             "opus-solo",
             "sonnet-solo",
         ]

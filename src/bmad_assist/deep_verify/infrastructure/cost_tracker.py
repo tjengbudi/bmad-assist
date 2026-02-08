@@ -41,6 +41,9 @@ MODEL_PRICING: dict[str, tuple[float, float]] = {
     "gpt-4-turbo": (10.00, 30.00),  # GPT-4 Turbo
     "gpt-4": (30.00, 60.00),  # GPT-4
     "gpt-3.5-turbo": (0.50, 1.50),  # GPT-3.5 Turbo
+    # Z.ai models
+    "zai-coding-plan/glm-4.5": (1.00, 3.00),  # GLM 4.5
+    "zai-coding-plan/glm-4.7": (1.00, 3.00),  # GLM 4.7
 }
 
 # Default pricing for unknown models (conservative estimate)

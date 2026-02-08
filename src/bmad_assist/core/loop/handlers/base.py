@@ -596,6 +596,22 @@ class BaseHandler(ABC):
             # Single-LLM: use directly
             return phase_config.model
 
+    def _get_reasoning_effort(self) -> str | None:
+        """Get reasoning_effort from provider config if available."""
+        provider_type = self._get_provider_type()
+
+        if provider_type == "helper":
+            return None
+
+        phase_config = self._get_phase_config()
+
+        if isinstance(phase_config, list):
+            if not phase_config:
+                return None
+            return getattr(phase_config[0], "reasoning_effort", None)
+        else:
+            return getattr(phase_config, "reasoning_effort", None)
+
     def invoke_provider(
         self, prompt: str, retry_timeout_minutes: int = 30, retry_delay: int = 60
     ) -> ProviderResult:
@@ -670,6 +686,9 @@ class BaseHandler(ABC):
                     attempt - 1,
                 )
 
+            # Resolve reasoning_effort from provider config
+            reasoning_effort = self._get_reasoning_effort()
+
             try:
                 return provider.invoke(
                     prompt,
@@ -678,6 +697,7 @@ class BaseHandler(ABC):
                     timeout=timeout,
                     settings_file=settings_file,
                     cwd=self.project_path,
+                    reasoning_effort=reasoning_effort,
                 )
             except ProviderExitCodeError as e:
                 last_error = e

@@ -716,7 +716,7 @@ class TestRealEpicsFile:
 
     def test_parse_real_epics_file(self) -> None:
         """Parse fixture epics.md file (60 stories expected)."""
-        epics_path = Path("tests/fixtures/bmad-sample-project/docs/epics.md")
+        epics_path = Path(__file__).parents[2] / "tests/fixtures/bmad-sample-project/docs/epics.md"
 
         assert epics_path.exists(), f"Fixture file not found: {epics_path}"
 

@@ -21,6 +21,7 @@ CUSTOM_WORKFLOWS = {
     "code-review-synthesis",  # Multi-LLM consolidation
     "qa-plan-generate",  # QA module - not in standard BMAD
     "qa-plan-execute",  # QA module - not in standard BMAD
+    "security-review",  # Security agent - CWE-based analysis
 }
 
 # Standard BMAD workflows - prefer user's installation, fallback to bundled

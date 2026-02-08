@@ -17,6 +17,37 @@
     <action>Group related findings that address the same underlying problem</action>
   </step>
 
+  <step n="1.5" goal="Review Deep Verify code analysis" conditional="[Deep Verify Findings] section present">
+    <critical>Deep Verify analyzed the actual source code files for this story.
+      DV findings are based on static analysis patterns and may identify issues reviewers missed.</critical>
+
+    <action>Review each DV finding:
+      - CRITICAL findings: Security vulnerabilities, race conditions, resource leaks - must address
+      - ERROR findings: Bugs, missing error handling, boundary issues - should address
+      - WARNING findings: Code quality concerns - consider addressing
+    </action>
+
+    <action>Cross-reference DV findings with reviewer findings:
+      - DV + Reviewers agree: High confidence issue, prioritize in fix order
+      - Only DV flags: Verify in source code - DV has precise line numbers
+      - Only reviewers flag: May be design/logic issues DV can't detect
+    </action>
+
+    <action>DV findings may include evidence with:
+      - Code quotes (exact text from source)
+      - Line numbers (precise location, when available)
+      - Pattern IDs (known antipattern reference)
+      Use this evidence when applying fixes.</action>
+
+    <action>DV patterns reference:
+      - CC-*: Concurrency issues (race conditions, deadlocks)
+      - SEC-*: Security vulnerabilities
+      - DB-*: Database/storage issues
+      - DT-*: Data transformation issues
+      - GEN-*: General code quality (null handling, resource cleanup)
+    </action>
+  </step>
+
   <step n="2" goal="Verify issues and identify false positives">
     <action>For each issue, verify against embedded code context:
       - Does the issue actually exist in the current code?
@@ -100,7 +131,7 @@
     </action>
   </step>
 
-  <step n="6" goal="Generate synthesis report with METRICS_JSON">
+  <step n="6" goal="Generate synthesis report">
     <critical>When updating story file, use atomic write pattern (temp file + rename).</critical>
     <action>Update story file Dev Agent Record section ONLY:
       - Mark completed tasks with [x] if fixes address them
@@ -156,6 +187,21 @@
 ]
 [If no changes: "No source code changes required."]
 
+## Deep Verify Integration
+[If DV findings were present, document how they were handled]
+
+### DV Findings Fixed
+[List DV findings that resulted in code changes]
+[Format: "- **{ID}** [{SEVERITY}]: {Title} | **File**: {path} | **Fix**: {What was changed}"]
+
+### DV Findings Dismissed
+[List DV findings determined to be false positives]
+[Format: "- **{ID}** [{SEVERITY}]: {Title} | **Reason**: {Why this is not an issue}"]
+
+### DV-Reviewer Overlap
+[Note findings flagged by both DV and reviewers - highest confidence fixes]
+[If no DV findings: "Deep Verify did not produce findings for this story."]
+
 ## Files Modified
 [Simple list of all files that were modified]
 - path/to/file1.py
@@ -174,50 +220,10 @@
 &lt;!-- CODE_REVIEW_SYNTHESIS_END --&gt;
     </output-format>
 
-    <action>After the synthesis report (outside the markers), output structured metrics for benchmarking:</action>
-    <!-- CRITICAL: This METRICS_JSON schema is also defined in validate-create-story-synthesis/instructions.xml.
-         ANY changes must be synchronized across BOTH workflows or benchmarking breaks. -->
-    <critical>Include EXACTLY this JSON structure between markers - all fields are REQUIRED.
-         Replace placeholders with actual computed values (floats for ratios, integers for counts, boolean for follows_template):</critical>
-    <output-format><![CDATA[
-<!-- METRICS_JSON_START -->
-{
-  "quality": {
-    "actionable_ratio": 0.0,
-    "specificity_score": 0.0,
-    "evidence_quality": 0.0,
-    "follows_template": true,
-    "internal_consistency": 1.0
-  },
-  "consensus": {
-    "agreed_findings": 0,
-    "unique_findings": 0,
-    "disputed_findings": 0,
-    "missed_findings": 0,
-    "agreement_score": 1.0,
-    "false_positive_count": 0
-  }
-}
-<!-- METRICS_JSON_END -->
-
-Field definitions (compute actual values):
-- actionable_ratio: (findings with specific fix suggestion) / total_findings, or 1.0 if no findings
-- specificity_score: (findings with location + evidence) / total_findings, or 1.0 if no findings
-- evidence_quality: average per finding of (has_source_citation*0.5 + has_code_snippet*0.3 + has_reasoning*0.2), or 1.0 if no findings
-- follows_template: true if output matches expected synthesis format with all required headings, else false
-- internal_consistency: 1 - (contradictions_count / total_findings), clamped to [0,1], or 1.0 if no findings
-- agreed_findings: count of issues where 3+ reviewers flagged same problem
-- unique_findings: count of issues flagged by exactly 1 reviewer
-- disputed_findings: count of issues where reviewers disagreed
-- agreement_score: agreed_findings / (agreed + unique + disputed), or 1.0 if denominator is 0
-- false_positive_count: count of findings dismissed as false positives
-]]></output-format>
   </step>
 
   <edge-cases>
     <case name="no-issues-found">
-      <action>Set quality.actionable_ratio = 1.0, quality.specificity_score = 1.0</action>
-      <action>Set consensus.agreed_findings = 0, consensus.agreement_score = 1.0</action>
       <action>Generate report with "No issues requiring fixes" in each severity section</action>
     </case>
 
@@ -243,4 +249,33 @@ Field definitions (compute actual values):
       <action>Consider if project_context.md needs clarification to prevent future reviewer confusion</action>
     </case>
   </edge-cases>
+
+  <security-analysis>
+    <condition>Only process this section if {{security_findings}} is present and non-empty.</condition>
+
+    <timeout-banner>
+      <condition>If {{security_review_status}} equals "TIMEOUT":</condition>
+      <action>Include this banner at the top of your Security Analysis section:
+        "SECURITY REVIEW NOT COMPLETED - security analysis timed out, manual security review recommended"</action>
+    </timeout-banner>
+
+    <instructions>
+      <action>Review security agent findings alongside code reviewer outputs.</action>
+      <action>Note: code reviewers' security checks (step 4i) may have identified some of the same issues.
+        When both report the same vulnerability, prefer the security agent's CWE classification.</action>
+      <action>For each security finding:
+        - HIGH severity findings with confidence >= 0.8 MUST be explicitly addressed in your synthesis.
+          Either apply the fix or provide detailed justification for disagreeing.
+        - MEDIUM severity findings SHOULD be evaluated. Apply fixes where appropriate.
+        - LOW severity findings are informational. Note them but fixing is optional.
+      </action>
+      <action>You MAY disagree with any security finding, but you MUST provide clear justification
+        referencing specific code evidence or project patterns.</action>
+      <action>Include a "Security Analysis" section in your synthesis report summarizing:
+        - Findings addressed (with applied fixes)
+        - Findings dismissed (with justification)
+        - Findings deferred (with reasoning)
+      </action>
+    </instructions>
+  </security-analysis>
 </workflow>

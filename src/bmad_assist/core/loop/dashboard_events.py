@@ -447,6 +447,88 @@ def emit_phase_complete(
 
 
 # =============================================================================
+# Security Review Agent Events
+# =============================================================================
+
+
+def emit_security_review_started(
+    run_id: str,
+    sequence_id: int,
+) -> None:
+    """Emit security_review_started when security agent task is created.
+
+    Args:
+        run_id: Run identifier.
+        sequence_id: Monotonic sequence number.
+
+    """
+    event_data = {
+        "type": "security_review_started",
+        "timestamp": datetime.now(UTC).isoformat(),
+        "run_id": run_id,
+        "sequence_id": sequence_id,
+        "data": {},
+    }
+    _emit_dashboard_event(event_data)
+
+
+def emit_security_review_completed(
+    run_id: str,
+    sequence_id: int,
+    finding_count: int,
+    severity_summary: dict[str, int],
+    timed_out: bool = False,
+) -> None:
+    """Emit security_review_completed when security agent finishes.
+
+    Args:
+        run_id: Run identifier.
+        sequence_id: Monotonic sequence number.
+        finding_count: Total number of findings.
+        severity_summary: Counts by severity (e.g., {"HIGH": 2, "MEDIUM": 3}).
+        timed_out: Whether the review timed out (partial results).
+
+    """
+    event_data = {
+        "type": "security_review_completed",
+        "timestamp": datetime.now(UTC).isoformat(),
+        "run_id": run_id,
+        "sequence_id": sequence_id,
+        "data": {
+            "finding_count": finding_count,
+            "severity_summary": severity_summary,
+            "timed_out": timed_out,
+        },
+    }
+    _emit_dashboard_event(event_data)
+
+
+def emit_security_review_failed(
+    run_id: str,
+    sequence_id: int,
+    error: str,
+) -> None:
+    """Emit security_review_failed when security agent errors out.
+
+    Args:
+        run_id: Run identifier.
+        sequence_id: Monotonic sequence number.
+        error: Error description.
+
+    """
+    event_data = {
+        "type": "security_review_failed",
+        "timestamp": datetime.now(UTC).isoformat(),
+        "run_id": run_id,
+        "sequence_id": sequence_id,
+        "data": {
+            "error": error,
+        },
+    }
+    _emit_dashboard_event(event_data)
+
+
+# =============================================================================
 # Model Invocation Tracking
 # =============================================================================
 
@@ -544,6 +626,10 @@ __all__ = [
     # Story 22.11: Validator progress and phase complete events
     "emit_validator_progress",
     "emit_phase_complete",
+    # Security review agent events
+    "emit_security_review_started",
+    "emit_security_review_completed",
+    "emit_security_review_failed",
     # Model invocation tracking
     "emit_model_started",
     "reset_model_counters",

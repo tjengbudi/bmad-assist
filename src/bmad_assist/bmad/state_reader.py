@@ -114,6 +114,9 @@ def _load_epics(bmad_path: Path) -> list[EpicDocument]:
     - Single file: docs/epics.md (consolidated epics)
     - Sharded directory: docs/epics/ (separate file per epic)
 
+    Falls back to paths.epics_dir when bmad_path has no epics (e.g., empty
+    planning-artifacts/ with epics in docs/).
+
     Args:
         bmad_path: Path to BMAD documentation directory.
 
@@ -121,6 +124,27 @@ def _load_epics(bmad_path: Path) -> list[EpicDocument]:
         List of parsed EpicDocument objects.
 
     """
+    result = _load_epics_from(bmad_path)
+    if result:
+        return result
+
+    # Fallback: try paths.epics_dir which has full resolution chain
+    # (project_knowledge → docs/ → auto-discovery)
+    try:
+        from bmad_assist.core.paths import get_paths
+
+        epics_dir = get_paths().epics_dir
+        if epics_dir.exists() and epics_dir.resolve() != (bmad_path / "epics").resolve():
+            logger.info("Falling back to epics_dir: %s", epics_dir)
+            return _load_epics_from(epics_dir.parent)
+    except RuntimeError:
+        pass  # Paths singleton not initialized
+
+    return []
+
+
+def _load_epics_from(bmad_path: Path) -> list[EpicDocument]:
+    """Load epics from a specific BMAD directory path."""
     # Detect sharded vs single-file pattern using sharding module
     epics_path, is_sharded = resolve_doc_path(bmad_path, "epics")
 

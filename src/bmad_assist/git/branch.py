@@ -192,17 +192,24 @@ def ensure_epic_branch(epic_id: EpicId, project_path: Path) -> bool:
         )
         return checkout_branch(expected_branch, project_path)
 
-    # Branch doesn't exist - create and checkout
+    # Branch doesn't exist - create and checkout atomically.
+    # Use 'checkout -b' instead of separate 'branch' + 'checkout' because
+    # 'git branch' fails in empty repos (no HEAD), while 'checkout -b' works.
     logger.info(
         "Creating new branch %s for epic %s (from %s)",
         expected_branch,
         epic_id,
         current_branch,
     )
-    if not create_branch(expected_branch, project_path):
+    exit_code, _, stderr = _run_git(
+        ["checkout", "-b", expected_branch],
+        project_path,
+    )
+    if exit_code != 0:
+        logger.error("Failed to create branch %s: %s", expected_branch, stderr)
         return False
-
-    return checkout_branch(expected_branch, project_path)
+    logger.info("Created and switched to branch: %s", expected_branch)
+    return True
 
 
 def is_git_enabled() -> bool:

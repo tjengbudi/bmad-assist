@@ -321,6 +321,7 @@ class TestBaseProviderAbstractMethods:
             "display_model",
             "thinking",
             "cancel_token",
+            "reasoning_effort",
         ]
 
         # Check prompt is positional

@@ -188,8 +188,8 @@ def wait_for_resume(
             pause_flag.unlink(missing_ok=True)
             return False
 
-        # Sleep before next check (100ms interval)
-        time.sleep(0.1)
+        # Sleep before next check (2s interval — pause is human-initiated)
+        time.sleep(2.0)
 
     logger.info("Pause flag cleared - resuming from pause")
     return True

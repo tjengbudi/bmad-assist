@@ -10,6 +10,7 @@ Public API:
 """
 
 import logging
+import os
 from datetime import UTC, datetime
 from pathlib import Path
 
@@ -20,6 +21,7 @@ from bmad_assist.compiler.patching.cache import (
     compute_file_hash,
 )
 from bmad_assist.compiler.patching.discovery import (
+    compute_defaults_hash,
     determine_patch_source_level,
     discover_patch,
     load_patch,
@@ -336,6 +338,18 @@ def compile_patch(
     workflow_hash = compute_file_hash(workflow_yaml_path)
     instructions_hash = compute_file_hash(instructions_path)
 
+    # Build source_hashes dict (includes template.md when it exists)
+    source_hashes = {
+        "workflow.yaml": workflow_hash,
+        instructions_path.name: instructions_hash,  # Use actual filename
+    }
+    template_path = workflow_dir / "template.md"
+    if template_path.exists():
+        source_hashes["template.md"] = compute_file_hash(template_path)
+
+    # Compute defaults hash for cache invalidation
+    defaults_hash = compute_defaults_hash(patch_path, workflow)
+
     meta = TemplateMetadata(
         workflow=workflow,
         patch_name=patch.config.name,
@@ -343,6 +357,7 @@ def compile_patch(
         bmad_version=patch.compatibility.bmad_version,
         compiled_at=compiled_at,
         source_hash=patch_hash,
+        defaults_hash=defaults_hash,
     )
 
     template = generate_template(compiled_workflow, meta)
@@ -351,11 +366,9 @@ def compile_patch(
     cache_meta = CacheMeta(
         compiled_at=compiled_at,
         bmad_version=patch.compatibility.bmad_version,
-        source_hashes={
-            "workflow.yaml": workflow_hash,
-            instructions_path.name: instructions_hash,  # Use actual filename
-        },
+        source_hashes=source_hashes,
         patch_hash=patch_hash,
+        defaults_hash=defaults_hash,
     )
     cache.save(workflow, template, cache_meta, cache_location)
 
@@ -405,17 +418,96 @@ def ensure_template_compiled(
     # Step 2: Find workflow source files for cache validation
     try:
         workflow_yaml_path, instructions_path = _find_workflow_files(workflow, project_root)
+        workflow_dir = workflow_yaml_path.parent
         source_files = {
             "workflow.yaml": workflow_yaml_path,
             instructions_path.name: instructions_path,  # Use actual filename (.xml or .md)
         }
+        # Include template.md in source validation when it exists
+        template_path = workflow_dir / "template.md"
+        if template_path.exists():
+            source_files["template.md"] = template_path
     except PatchError as e:
         # Can't find workflow files
         raise CompilerError(str(e)) from e
 
-    # Step 3: Check cache locations in priority order
+    # Step 2b: Compute current hashes for validation
+    current_patch_hash = compute_file_hash(patch_path)
+    current_defaults_hash = compute_defaults_hash(patch_path, workflow)
+
+    # Step 2c: Check bundled cache (before local cache)
+    # If user has default (unmodified) patches, bundled template wins
+    from bmad_assist.workflows import get_bundled_cache
+
+    bundled = get_bundled_cache(workflow)
+    if bundled is not None:
+        tpl_content, meta_content = bundled
+        try:
+            import yaml
+
+            bundled_meta = yaml.safe_load(meta_content)
+            bundled_patch_hash = bundled_meta.get("patch_hash")
+
+            if current_patch_hash == bundled_patch_hash:
+                # Patch matches bundled - validate source hashes against DISCOVERED sources
+                bundled_source_hashes = bundled_meta.get("source_hashes", {})
+                sources_valid = True
+                for name, path in source_files.items():
+                    if not path.exists():
+                        sources_valid = False
+                        break
+                    if compute_file_hash(path) != bundled_source_hashes.get(name):
+                        sources_valid = False
+                        break
+
+                # Validate defaults_hash (both must be non-None to compare)
+                bundled_defaults_hash = bundled_meta.get("defaults_hash")
+                if (
+                    bundled_defaults_hash is not None
+                    and current_defaults_hash is not None
+                    and bundled_defaults_hash != current_defaults_hash
+                ):
+                    sources_valid = False
+
+                if sources_valid:
+                    # Write bundled content to local cache (one-time copy)
+                    # Use atomic writes (temp + rename) for crash resilience
+                    local_cache_path = cache.get_cache_path(workflow, project_root)
+                    local_cache_path.parent.mkdir(parents=True, exist_ok=True)
+                    tmp_tpl = local_cache_path.with_suffix(".tmp")
+                    tmp_tpl.write_text(tpl_content, encoding="utf-8")
+                    os.rename(tmp_tpl, local_cache_path)
+                    # Also write meta atomically
+                    meta_path = local_cache_path.with_suffix(
+                        local_cache_path.suffix + ".meta.yaml"
+                    )
+                    tmp_meta = meta_path.with_suffix(".tmp")
+                    tmp_meta.write_text(meta_content, encoding="utf-8")
+                    os.rename(tmp_meta, meta_path)
+                    logger.info("Using bundled cache for %s (copied to %s)", workflow, local_cache_path)
+                    return local_cache_path
+                else:
+                    logger.debug(
+                        "Bundled cache for %s has stale source hashes, skipping",
+                        workflow,
+                    )
+            else:
+                logger.debug(
+                    "Patch hash mismatch for %s (custom patch), skipping bundled cache",
+                    workflow,
+                )
+        except Exception:
+            logger.warning(
+                "Bundled cache meta corrupted for %s, skipping", workflow
+            )
+
+    # Step 3: Check local cache locations in priority order
     # Project cache
-    if cache.is_valid(workflow, project_root, source_files=source_files, patch_path=patch_path):
+    if cache.is_valid(
+        workflow, project_root,
+        source_files=source_files, patch_path=patch_path,
+        defaults_hash=current_defaults_hash,
+    ):
         cache_path = cache.get_cache_path(workflow, project_root)
         logger.debug("Using project cache: %s", cache_path)
         return cache_path
@@ -424,14 +516,22 @@ def ensure_template_compiled(
     if (
         cwd is not None
         and cwd.resolve() != project_root.resolve()
-        and cache.is_valid(workflow, cwd, source_files=source_files, patch_path=patch_path)
+        and cache.is_valid(
+            workflow, cwd,
+            source_files=source_files, patch_path=patch_path,
+            defaults_hash=current_defaults_hash,
+        )
     ):
         cache_path = cache.get_cache_path(workflow, cwd)
         logger.debug("Using CWD cache: %s", cache_path)
         return cache_path
 
     # Global cache
-    if cache.is_valid(workflow, None, source_files=source_files, patch_path=patch_path):
+    if cache.is_valid(
+        workflow, None,
+        source_files=source_files, patch_path=patch_path,
+        defaults_hash=current_defaults_hash,
+    ):
         cache_path = cache.get_cache_path(workflow, None)
         logger.debug("Using global cache: %s", cache_path)
         return cache_path

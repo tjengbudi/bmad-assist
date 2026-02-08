@@ -35,6 +35,7 @@ from bmad_assist.compiler.shared_utils import (
     apply_post_process,
     context_snapshot,
     find_sprint_status_file,
+    format_dv_findings_for_prompt,
     get_stories_dir,
     load_workflow_template,
     resolve_story_file,
@@ -329,8 +330,9 @@ class ValidateStorySynthesisCompiler:
         # 5. Deep Verify findings (if available) - high priority technical validation
         dv_findings = context.resolved_variables.get("deep_verify_findings")
         if dv_findings:
-            files["[Deep Verify Findings]"] = dv_findings
-            logger.debug("Added Deep Verify findings to synthesis context (1.5x weight)")
+            dv_content = format_dv_findings_for_prompt(dv_findings)
+            files["[Deep Verify Findings]"] = dv_content
+            logger.debug("Added Deep Verify findings to synthesis context")
 
         # Count files for logging (excluding virtual paths starting with [)
         file_count = len([k for k in files if not k.startswith("[")])

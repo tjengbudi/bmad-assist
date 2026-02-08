@@ -338,7 +338,8 @@ def _add_epic_comments(dev_status: CommentedMap) -> None:
                             modified = True
 
                         if modified:
-                            dev_status.ca.items[key] = tuple(comment_list)
+                            # Keep as list - ruamel expects mutable structure
+                            dev_status.ca.items[key] = comment_list
 
     current_epic: str | int | None = None
 

@@ -168,13 +168,24 @@ def mock_provider() -> MagicMock:
     """Create a mock ClaudeSDKProvider."""
     mock = MagicMock()
     mock_result = MagicMock()
-    mock_result.stdout = json.dumps({
-        "violated": True,
-        "confidence": 0.95,
-        "evidence_quote": "return data[0]",
-        "line_number": 3,
-        "explanation": "No check for empty list before accessing index 0",
-    })
+    mock_result.stdout = json.dumps([
+        {
+            "id": "GEN-001",
+            "violated": True,
+            "confidence": 0.95,
+            "evidence_quote": "return data[0]",
+            "line_number": 3,
+            "explanation": "No check for empty list before accessing index 0",
+        },
+        {
+            "id": "GEN-002",
+            "violated": True,
+            "confidence": 0.9,
+            "evidence_quote": "data[0]",
+            "line_number": 3,
+            "explanation": "No null check",
+        },
+    ])
     mock_result.stderr = ""
     mock_result.exit_code = 0
     mock.invoke.return_value = mock_result
@@ -339,7 +350,7 @@ class TestBoundaryAnalysisMethodCreation:
         assert method.method_id == MethodId("#154")
         assert method._threshold == 0.6
         assert method._model == "haiku"
-        assert method._timeout == 30
+        assert method._timeout == 60
 
     def test_method_instantiation_custom_threshold(self) -> None:
         """Test creating BoundaryAnalysisMethod with custom threshold."""
@@ -386,73 +397,95 @@ class TestBoundaryAnalysisMethodCreation:
 
 
 class TestResponseParsing:
-    """Tests for LLM response parsing."""
+    """Tests for batched LLM response parsing."""
 
-    def test_parse_json_in_code_block(self) -> None:
-        """Test parsing JSON inside markdown code block."""
+    def test_parse_json_array_in_code_block(self) -> None:
+        """Test parsing JSON array inside markdown code block."""
         method = BoundaryAnalysisMethod()
         response = """```json
-{
-    "violated": true,
-    "confidence": 0.95,
-    "evidence_quote": "test quote",
-    "line_number": 5,
-    "explanation": "test explanation"
-}
+[
+    {
+        "id": "GEN-001",
+        "violated": true,
+        "confidence": 0.95,
+        "evidence_quote": "test quote",
+        "line_number": 5,
+        "explanation": "test explanation"
+    }
+]
 ```"""
 
-        result = method._parse_response(response)
+        results = method._parse_batch_response(response)
 
-        assert result.violated is True
-        assert result.confidence == 0.95
-        assert result.evidence_quote == "test quote"
-        assert result.line_number == 5
+        assert len(results) == 1
+        assert results[0].violated is True
+        assert results[0].confidence == 0.95
+        assert results[0].evidence_quote == "test quote"
+        assert results[0].line_number == 5
+        assert results[0].id == "GEN-001"
 
-    def test_parse_json_without_language_tag(self) -> None:
-        """Test parsing JSON in code block without language tag."""
+    def test_parse_json_array_without_language_tag(self) -> None:
+        """Test parsing JSON array in code block without language tag."""
         method = BoundaryAnalysisMethod()
         response = """```
-{
-    "violated": false,
-    "confidence": 0.8
-}
+[{"id": "GEN-001", "violated": false, "confidence": 0.8}]
 ```"""
 
-        result = method._parse_response(response)
+        results = method._parse_batch_response(response)
 
-        assert result.violated is False
-        assert result.confidence == 0.8
+        assert len(results) == 1
+        assert results[0].violated is False
+        assert results[0].confidence == 0.8
 
-    def test_parse_raw_json(self) -> None:
-        """Test parsing raw JSON without code block."""
+    def test_parse_raw_json_array(self) -> None:
+        """Test parsing raw JSON array without code block."""
         method = BoundaryAnalysisMethod()
-        response = '{"violated": true, "confidence": 0.9}'
+        response = '[{"id": "GEN-001", "violated": true, "confidence": 0.9}]'
 
-        result = method._parse_response(response)
+        results = method._parse_batch_response(response)
 
-        assert result.violated is True
-        assert result.confidence == 0.9
+        assert len(results) == 1
+        assert results[0].violated is True
+        assert results[0].confidence == 0.9
 
-    def test_parse_invalid_json_raises_error(self) -> None:
-        """Test that invalid JSON raises ValueError."""
+    def test_parse_invalid_json_returns_empty(self) -> None:
+        """Test that invalid JSON returns empty list via fallback."""
         method = BoundaryAnalysisMethod()
         response = "This is not JSON"
 
-        with pytest.raises(ValueError):
-            method._parse_response(response)
+        results = method._parse_batch_response(response)
+
+        assert results == []
+
+    def test_parse_multiple_items(self) -> None:
+        """Test parsing batch response with multiple items."""
+        method = BoundaryAnalysisMethod()
+        response = json.dumps([
+            {"id": "GEN-001", "violated": True, "confidence": 0.9},
+            {"id": "GEN-002", "violated": False, "confidence": 0.8},
+        ])
+
+        results = method._parse_batch_response(response)
+
+        assert len(results) == 2
+        assert results[0].id == "GEN-001"
+        assert results[0].violated is True
+        assert results[1].id == "GEN-002"
+        assert results[1].violated is False
 
     def test_parse_missing_fields_uses_defaults(self) -> None:
         """Test parsing JSON with missing optional fields."""
         method = BoundaryAnalysisMethod()
-        response = '{"violated": true, "confidence": 0.7}'
+        response = '[{"id": "GEN-001", "violated": true, "confidence": 0.7}]'
 
-        result = method._parse_response(response)
+        results = method._parse_batch_response(response)
 
-        assert result.violated is True
-        assert result.confidence == 0.7
-        assert result.evidence_quote == ""
-        assert result.line_number is None
-        assert result.explanation == ""
+        assert len(results) == 1
+        assert results[0].violated is True
+        assert results[0].confidence == 0.7
+        assert results[0].evidence_quote == ""
+        assert results[0].line_number is None
+        assert results[0].explanation == ""
 
 
 # =============================================================================
@@ -584,43 +617,59 @@ class TestFindingCreation:
 
 
 class TestPromptBuilding:
-    """Tests for prompt building."""
+    """Tests for batch prompt building."""
 
-    def test_build_prompt_includes_checklist_item(self) -> None:
-        """Test that prompt includes checklist item details."""
+    def test_build_batch_prompt_includes_all_items(self) -> None:
+        """Test that batch prompt includes all checklist item details."""
         method = BoundaryAnalysisMethod()
-        item = ChecklistItem(
-            id="GEN-001",
-            category="empty_input",
-            question="Does the code handle empty input?",
-            description="Empty strings should not cause crashes",
-            severity=Severity.ERROR,
-            domain="general",
-        )
+        items = [
+            ChecklistItem(
+                id="GEN-001",
+                category="empty_input",
+                question="Does the code handle empty input?",
+                description="Empty strings should not cause crashes",
+                severity=Severity.ERROR,
+                domain="general",
+            ),
+            ChecklistItem(
+                id="GEN-002",
+                category="null_handling",
+                question="Does the code handle null?",
+                description="Null should not cause crashes",
+                severity=Severity.ERROR,
+                domain="general",
+            ),
+        ]
 
-        prompt = method._build_prompt("code here", item)
+        prompt = method._build_batch_prompt("code here", items)
 
         assert "GEN-001" in prompt
+        assert "GEN-002" in prompt
         assert "empty_input" in prompt
+        assert "null_handling" in prompt
         assert "Does the code handle empty input?" in prompt
+        assert "Does the code handle null?" in prompt
         assert "code here" in prompt
+        assert "(2 items)" in prompt
 
-    def test_build_prompt_truncates_artifact(self) -> None:
+    def test_build_batch_prompt_truncates_artifact(self) -> None:
         """Test that long artifacts are truncated."""
         method = BoundaryAnalysisMethod()
-        item = ChecklistItem(
-            id="GEN-001",
-            category="empty_input",
-            question="Does the code handle empty input?",
-            description="Empty strings should not cause crashes",
-            severity=Severity.ERROR,
-            domain="general",
-        )
+        items = [
+            ChecklistItem(
+                id="GEN-001",
+                category="empty_input",
+                question="Does the code handle empty input?",
+                description="Empty strings should not cause crashes",
+                severity=Severity.ERROR,
+                domain="general",
+            ),
+        ]
         long_artifact = "x" * 5000
 
-        prompt = method._build_prompt(long_artifact, item)
+        prompt = method._build_batch_prompt(long_artifact, items)
 
-        # Should be truncated
+        # Should be truncated (MAX_ARTIFACT_LENGTH=3000)
         assert len(prompt) < 5500
 
 
@@ -674,13 +723,12 @@ class TestEdgeCases:
         self, temp_checklist_dir: Path, mock_provider: MagicMock
     ) -> None:
         """Test that no findings returned when not violated."""
-        # Mock response indicating no violation
+        # Mock batch response indicating no violations
         mock_result = MagicMock()
-        mock_result.stdout = json.dumps({
-            "violated": False,
-            "confidence": 0.9,
-            "explanation": "Properly handled",
-        })
+        mock_result.stdout = json.dumps([
+            {"id": "GEN-001", "violated": False, "confidence": 0.9, "explanation": "Properly handled"},
+            {"id": "GEN-002", "violated": False, "confidence": 0.85, "explanation": "Handled"},
+        ])
         mock_provider.invoke.return_value = mock_result
         mock_provider.parse_output.return_value = mock_result.stdout
 
@@ -700,13 +748,12 @@ class TestEdgeCases:
         self, temp_checklist_dir: Path, mock_provider: MagicMock
     ) -> None:
         """Test that no findings returned when confidence below threshold."""
-        # Mock response with low confidence
+        # Mock batch response with low confidence
         mock_result = MagicMock()
-        mock_result.stdout = json.dumps({
-            "violated": True,
-            "confidence": 0.3,  # Below default threshold of 0.6
-            "evidence_quote": "something",
-        })
+        mock_result.stdout = json.dumps([
+            {"id": "GEN-001", "violated": True, "confidence": 0.3, "evidence_quote": "something"},
+            {"id": "GEN-002", "violated": True, "confidence": 0.2, "evidence_quote": "other"},
+        ])
         mock_provider.invoke.return_value = mock_result
         mock_provider.parse_output.return_value = mock_result.stdout
 
@@ -782,25 +829,9 @@ class TestErrorHandling:
     async def test_graceful_failure_on_llm_error(
         self, temp_checklist_dir: Path, mock_provider: MagicMock, caplog: pytest.LogCaptureFixture
     ) -> None:
-        """Test that LLM errors return partial results with logged warning."""
-        # Make provider raise exception on second call
-        call_count = 0
-
-        def side_effect(*args, **kwargs):
-            nonlocal call_count
-            call_count += 1
-            if call_count == 1:
-                raise Exception("LLM error")
-            # Return valid result for other calls
-            mock_result = MagicMock()
-            mock_result.stdout = json.dumps({
-                "violated": True,
-                "confidence": 0.9,
-                "evidence_quote": "test",
-            })
-            return mock_result
-
-        mock_provider.invoke.side_effect = side_effect
+        """Test that LLM errors return empty results with logged warning."""
+        # Make provider raise exception (single batched call fails)
+        mock_provider.invoke.side_effect = Exception("LLM error")
 
         with patch(
             "bmad_assist.deep_verify.methods.boundary_analysis.ClaudeSDKProvider",
@@ -811,9 +842,9 @@ class TestErrorHandling:
             with caplog.at_level(logging.WARNING):
                 findings = await method.analyze("some code")
 
-            # Should have partial results (only second item)
-            # and log warning about first item failure
-            assert "Checklist analysis failed" in caplog.text
+            # Should return empty and log warning
+            assert len(findings) == 0
+            assert "Boundary analysis failed" in caplog.text
 
     @pytest.mark.asyncio
     async def test_no_checklists_available(self, tmp_path: Path) -> None:

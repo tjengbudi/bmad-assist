@@ -51,6 +51,7 @@ from bmad_assist.providers.base import (
     ProviderResult,
     extract_tool_details,
     format_tag,
+    is_full_stream,
     resolve_settings_file,
     should_print_progress,
     validate_settings_file,
@@ -447,6 +448,7 @@ class KimiProvider(BaseProvider):
         display_model: str | None = None,
         thinking: bool | None = None,
         cancel_token: threading.Event | None = None,
+        reasoning_effort: str | None = None,
     ) -> ProviderResult:
         """Execute kimi-cli with the given prompt using JSON streaming.
 
@@ -636,11 +638,14 @@ class KimiProvider(BaseProvider):
                                 if content:
                                     text_parts.append(content)
                                     if should_print_progress():
-                                        preview = content[:200]
-                                        if len(content) > 200:
-                                            preview += "..."
                                         tag = format_tag("ASSISTANT", color_idx)
-                                        write_progress(f"{tag} {preview}")
+                                        if is_full_stream():
+                                            write_progress(f"{tag} {content}")
+                                        else:
+                                            preview = content[:200]
+                                            if len(content) > 200:
+                                                preview += "..."
+                                            write_progress(f"{tag} {preview}")
 
                                 # Log tool calls if present
                                 tool_calls = msg.get("tool_calls", [])
@@ -652,12 +657,15 @@ class KimiProvider(BaseProvider):
                                             args = json.loads(func.get("arguments", "{}"))
                                         except json.JSONDecodeError:
                                             args = {}
-                                        details = extract_tool_details(tool_name, args)
                                         tag = format_tag(f"TOOL {tool_name}", color_idx)
-                                        if details:
-                                            write_progress(f"{tag} {details}")
+                                        if is_full_stream():
+                                            write_progress(f"{tag} {json.dumps(args, indent=2)}")
                                         else:
-                                            write_progress(f"{tag}")
+                                            details = extract_tool_details(tool_name, args)
+                                            if details:
+                                                write_progress(f"{tag} {details}")
+                                            else:
+                                                write_progress(f"{tag}")
 
                             elif role == "tool":
                                 # Tool result - skip display (too verbose)
@@ -745,9 +753,9 @@ class KimiProvider(BaseProvider):
                         partial_result=partial_result,
                     ) from None
 
-                # Wait for threads to finish
-                stdout_thread.join()
-                stderr_thread.join()
+                # Wait for threads to finish (timeout prevents hang if reader stuck)
+                stdout_thread.join(timeout=10)
+                stderr_thread.join(timeout=10)
 
             except FileNotFoundError as e:
                 logger.error("Kimi CLI not found in PATH")

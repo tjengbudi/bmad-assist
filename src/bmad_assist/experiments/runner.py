@@ -381,14 +381,19 @@ class ExperimentRunner:
             )
             manifest_manager.create(manifest_input, manifest_resolved, started, run_id)
 
-            # 5. Build experiment Config from ConfigTemplate
-            experiment_config = self._build_experiment_config(config_template)
+            # 5. Build config dict and write to snapshot as bmad-assist.yaml
+            # This makes the snapshot self-contained — the config is the sole source.
+            config_dict = self._build_config_dict(config_template)
+            snapshot_config_path = snapshot_path / "bmad-assist.yaml"
+            with open(snapshot_config_path, "w", encoding="utf-8") as f:
+                yaml.dump(config_dict, f, default_flow_style=False, sort_keys=False)
 
             # 5a. CRITICAL: Set config singleton for compile_patch() and other internals
             # that use get_config(). Without this, patch compilation fails.
-            from bmad_assist.core.config import load_config
+            from bmad_assist.core.config import get_config, load_config
 
-            load_config(experiment_config.model_dump())
+            load_config(config_dict)
+            experiment_config = get_config()
 
             # 6. Initialize handlers with snapshot_path (NOT project_root!)
             init_handlers(experiment_config, snapshot_path)
@@ -862,26 +867,33 @@ class ExperimentRunner:
 
         return state
 
-    def _build_experiment_config(self, template: ConfigTemplate) -> Config:
-        """Build full Config object from ConfigTemplate.
+    def _build_config_dict(self, template: ConfigTemplate) -> dict[str, object]:
+        """Build config dict from template for load_config().
 
-        ConfigTemplate.providers already uses MasterProviderConfig and MultiProviderConfig
-        from core/config.py, so we just wrap them in a full Config with defaults.
+        For full configs (config_name), passes through the entire raw config.
+        For legacy templates (name + providers only), builds minimal dict.
 
         Args:
             template: Config template with provider settings.
 
         Returns:
-            Full Config object suitable for init_handlers().
+            Dict suitable for load_config().
 
         """
-        return Config(
-            providers=ProviderConfig(
-                master=template.providers.master,
-                multi=template.providers.multi,
-            ),
-            # Use defaults for all other Config fields (state_path, timeout, etc.)
-        )
+        if template.raw_config:
+            config_dict = dict(template.raw_config)
+            for key in ("name", "config_name", "description"):
+                config_dict.pop(key, None)
+            return config_dict
+        # Legacy fallback: build minimal from providers
+        if template.providers is not None:
+            return Config(
+                providers=ProviderConfig(
+                    master=template.providers.master,
+                    multi=template.providers.multi,
+                ),
+            ).model_dump()
+        return {}
 
     def _increment_story_id(self, story_id: str) -> str:
         """Increment story ID (e.g., "1.1" -> "1.2").

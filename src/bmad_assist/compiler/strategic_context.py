@@ -350,8 +350,15 @@ class StrategicContextService:
             if dir_name:
                 planning_dir = get_planning_artifacts_dir(self.context)
 
-                # Try planning_artifacts first, then project_knowledge
-                for base_dir in [planning_dir, self.context.project_knowledge]:
+                # Try planning_artifacts, project_knowledge, then docs/ fallback
+                search_dirs: list[Path | None] = [planning_dir, self.context.project_knowledge]
+                docs_fallback = self.context.project_root / "docs"
+                if docs_fallback.resolve() not in {
+                    d.resolve() for d in search_dirs if d is not None
+                }:
+                    search_dirs.append(docs_fallback)
+
+                for base_dir in search_dirs:
                     if base_dir is None:
                         continue
                     shard_dir = base_dir / dir_name

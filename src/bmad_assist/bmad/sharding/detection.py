@@ -61,16 +61,33 @@ def resolve_doc_path(base_path: Path, doc_name: str) -> tuple[Path, bool]:
     sharded_dir = base_path / doc_name
 
     # PRECEDENCE: Sharded directory takes priority over single file
-    # This allows stub files (redirects) to coexist with sharded directories
     if sharded_dir.is_dir():
-        if single_file.exists():
-            logger.debug(
-                "Both %s/ and %s exist; using sharded directory (precedence rule)",
-                sharded_dir,
-                single_file,
-            )
-        return sharded_dir, True
-    elif single_file.exists():
+        # A directory is only truly sharded if it contains markdown files
+        has_shards = any(sharded_dir.glob("*.md"))
+
+        # If directory has shards, it ALWAYS wins
+        if has_shards:
+            if single_file.exists():
+                logger.debug(
+                    "Both %s/ and %s exist; using sharded directory (precedence rule)",
+                    sharded_dir,
+                    single_file,
+                )
+            return sharded_dir, True
+
+        # If directory is empty, it only wins if no single file exists
+        if not single_file.exists():
+            return sharded_dir, True
+
+        # Empty directory + existing file -> file wins
+        logger.debug(
+            "Sharded directory %s is empty; falling back to single file: %s",
+            sharded_dir,
+            single_file,
+        )
+        return single_file, False
+
+    if single_file.exists():
         logger.debug("Using single file: %s", single_file)
         return single_file, False
     else:

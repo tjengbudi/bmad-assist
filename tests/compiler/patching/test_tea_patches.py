@@ -165,6 +165,8 @@ post_process:
         self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
     ) -> None:
         """Should return empty list when no defaults.yaml exists anywhere."""
+        from unittest.mock import patch as mock_patch
+
         from bmad_assist.compiler.patching.discovery import load_defaults
 
         # Patch home to avoid loading global defaults
@@ -176,7 +178,11 @@ post_process:
         patch_file = patches_dir / "test-workflow.patch.yaml"
         patch_file.write_text("")
 
-        result = load_defaults(patch_file)
+        with mock_patch(
+            "bmad_assist.compiler.patching.discovery._PACKAGE_DEFAULTS_DIR",
+            tmp_path / "nonexistent_pkg",
+        ):
+            result = load_defaults(patch_file)
 
         assert result == []
 

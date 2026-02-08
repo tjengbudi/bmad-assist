@@ -59,6 +59,9 @@ class MasterProviderConfig(BaseModel):
             used in logs/reports instead of model. Useful when "tricking"
             a CLI to use alternative models.
         settings: Optional path to provider settings JSON file (tilde expanded).
+        reasoning_effort: Reasoning effort level for supported providers (codex).
+            Valid values: minimal, low, medium, high, xhigh. If None, uses
+            provider default.
 
     """
 
@@ -83,6 +86,11 @@ class MasterProviderConfig(BaseModel):
         None,
         description="Path to provider settings JSON (tilde expanded)",
         json_schema_extra={"security": "dangerous"},
+    )
+    reasoning_effort: str | None = Field(
+        None,
+        description="Reasoning effort for codex: minimal, low, medium, high, xhigh",
+        json_schema_extra={"security": "safe", "ui_widget": "dropdown"},
     )
 
     @property
@@ -112,6 +120,9 @@ class MultiProviderConfig(BaseModel):
         settings: Optional path to provider settings JSON file (tilde expanded).
         thinking: Enable thinking mode for supported providers (e.g., kimi).
             If None, auto-detected from model name.
+        reasoning_effort: Reasoning effort level for supported providers (codex).
+            Valid values: minimal, low, medium, high, xhigh. If None, uses
+            provider default.
 
     """
 
@@ -141,6 +152,11 @@ class MultiProviderConfig(BaseModel):
         None,
         description="Enable thinking mode for supported providers (kimi). None=auto-detect.",
         json_schema_extra={"security": "safe", "ui_widget": "checkbox"},
+    )
+    reasoning_effort: str | None = Field(
+        None,
+        description="Reasoning effort for codex: minimal, low, medium, high, xhigh",
+        json_schema_extra={"security": "safe", "ui_widget": "dropdown"},
     )
 
     @property

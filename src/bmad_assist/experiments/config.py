@@ -70,13 +70,20 @@ class ConfigTemplateProviders(BaseModel):
 class ConfigTemplate(BaseModel):
     """Configuration template for experiment runs.
 
-    Defines which LLM providers and models to use for an experiment.
-    Templates are stored as YAML files in experiments/configs/.
+    Supports two formats:
+    - **Legacy template**: ``name`` + ``providers`` (master/multi only).
+    - **Full config**: ``config_name`` + full bmad-assist config fields
+      (providers, phase_models, timeouts, compiler, deep_verify, etc.).
+
+    For full configs, the raw YAML dict is stored in ``raw_config`` and
+    passed through to ``load_config()`` without stripping fields.
 
     Attributes:
-        name: Unique identifier for this template (alphanumeric, hyphens, underscores).
+        name: Unique identifier (from ``name`` or ``config_name`` field).
         description: Human-readable description of the template.
-        providers: Provider configuration section.
+        providers: Provider configuration (extracted for display; may be None
+            for full configs where provider structure differs).
+        raw_config: Full YAML dict for pass-through to ``load_config()``.
 
     """
 
@@ -92,9 +99,13 @@ class ConfigTemplate(BaseModel):
         description="Human-readable description of this configuration",
         json_schema_extra={"security": "safe"},
     )
-    providers: ConfigTemplateProviders = Field(
-        ...,
-        description="Provider configuration for this template",
+    providers: ConfigTemplateProviders | None = Field(
+        default=None,
+        description="Provider configuration (extracted for display)",
+    )
+    raw_config: dict[str, object] = Field(
+        default_factory=dict,
+        description="Full config dict for pass-through to load_config()",
     )
 
     @field_validator("name", mode="after")
@@ -240,22 +251,51 @@ def load_config_template(
     if len(content) > MAX_CONFIG_SIZE:
         raise ConfigError(f"Config template {path} exceeds 1MB limit")
 
-    # Build variable context
+    # Build variable context: ${home} always, ${project} if available
     var_context: dict[str, str | None] = {
         "home": os.path.expanduser("~"),
     }
 
-    # ${project} requires project_root parameter
     if "${project}" in content:
         if project_root is None:
-            raise ConfigError("project_root parameter required for ${project} variable resolution")
+            raise ConfigError(
+                "project_root parameter required for ${project} variable resolution"
+            )
         var_context["project"] = str(project_root)
 
-    # Resolve variables before YAML parsing
-    try:
-        resolved_content = _resolve_variables(content, var_context)
-    except ConfigError:
-        raise
+    # Quick-detect format before full variable resolution:
+    # Full configs (config_name) may use ${ENV_VAR} from .env / environment.
+    # We need to know the format to build the right variable context.
+    _has_config_name = "config_name:" in content
+
+    if _has_config_name:
+        # Full config mode: load .env and resolve ${...} from env vars.
+        # Unresolved vars are left as-is (feature may be disabled).
+        from bmad_assist.core.config.env import load_env_file
+
+        load_env_file(project_root)
+
+        def _resolve_env(match: re.Match[str]) -> str:
+            var_name = match.group(1)
+            # Known template vars (home, project) take priority
+            if var_name in var_context:
+                val = var_context[var_name]
+                if val is not None:
+                    return val
+            # Try environment
+            env_val = os.environ.get(var_name)
+            if env_val is not None:
+                return env_val
+            # Leave unresolved — feature may be disabled
+            return match.group(0)
+
+        resolved_content = _VAR_PATTERN.sub(_resolve_env, content)
+    else:
+        # Legacy template mode: strict resolution (unknown vars = error)
+        try:
+            resolved_content = _resolve_variables(content, var_context)
+        except ConfigError:
+            raise
 
     # Parse YAML
     try:
@@ -271,30 +311,85 @@ def load_config_template(
             f"Config template {path} must contain a YAML mapping, got {type(data).__name__}"
         )
 
-    # Validate with Pydantic
+    # Detect format from parsed data
+    config_name = data.get("config_name")
+    name = data.get("name")
+
+    if config_name:
+        # Full config mode: store raw dict, extract providers for display
+        if not isinstance(config_name, str) or not config_name.strip():
+            raise ConfigError(f"config_name must be a non-empty string in {path}")
+
+        providers = None
+        providers_data = data.get("providers")
+        if providers_data and isinstance(providers_data, dict):
+            try:
+                providers = ConfigTemplateProviders(
+                    master=providers_data.get("master", {}),
+                    multi=providers_data.get("multi", []),
+                )
+            except (ValidationError, Exception):
+                logger.debug("Could not extract providers for display from %s", path)
+
+        try:
+            template = ConfigTemplate(
+                name=config_name,
+                description=data.get("description"),
+                providers=providers,
+                raw_config=data,
+            )
+        except ValidationError as e:
+            raise ConfigError(
+                f"Config template validation failed for {path}: {e}"
+            ) from e
+
+        # Validate providers if extracted
+        if template.providers is not None:
+            _validate_provider_name(template.providers.master.provider, "master")
+            for i, multi in enumerate(template.providers.multi):
+                _validate_provider_name(multi.provider, f"multi[{i}]")
+
+        return template
+
+    # Legacy template mode: strict validation
+    if not name:
+        raise ConfigError(
+            f"Config must have 'name' or 'config_name' field: {path}"
+        )
+
+    # Legacy templates require providers section
+    if "providers" not in data or data["providers"] is None:
+        raise ConfigError(
+            f"Config template validation failed for {path}: "
+            "legacy templates (using 'name') require a 'providers' section. "
+            "Use 'config_name' for full config pass-through."
+        )
+
+    # Store raw config alongside structured fields
+    data_with_raw = dict(data)
+    data_with_raw["raw_config"] = data
+
     try:
-        template = ConfigTemplate.model_validate(data)
+        template = ConfigTemplate.model_validate(data_with_raw)
     except ValidationError as e:
         raise ConfigError(f"Config template validation failed for {path}: {e}") from e
 
-    # Additional validation: warn on unknown providers
-    _validate_provider_name(template.providers.master.provider, "master")
-    for i, multi in enumerate(template.providers.multi):
-        _validate_provider_name(multi.provider, f"multi[{i}]")
+    # Additional validation: warn on unknown providers (legacy always has providers)
+    providers = template.providers
+    if providers is not None:
+        _validate_provider_name(providers.master.provider, "master")
+        for i, multi in enumerate(providers.multi):
+            _validate_provider_name(multi.provider, f"multi[{i}]")
 
-    # Validate model is non-empty
-    _validate_model_non_empty(template.providers.master.model, "master")
-    for i, multi in enumerate(template.providers.multi):
-        _validate_model_non_empty(multi.model, f"multi[{i}]")
+        # Validate model is non-empty
+        _validate_model_non_empty(providers.master.model, "master")
+        for i, multi in enumerate(providers.multi):
+            _validate_model_non_empty(multi.model, f"multi[{i}]")
 
-    # Validate settings paths exist
-    _validate_settings_path(
-        template.providers.master.settings,
-        "master",
-        project_root,
-    )
-    for i, multi in enumerate(template.providers.multi):
-        _validate_settings_path(multi.settings, f"multi[{i}]", project_root)
+        # Validate settings paths exist
+        _validate_settings_path(providers.master.settings, "master", project_root)
+        for i, multi in enumerate(providers.multi):
+            _validate_settings_path(multi.settings, f"multi[{i}]", project_root)
 
     return template
 
@@ -392,8 +487,8 @@ class ConfigRegistry:
                     )
                     continue
 
-                # Check name field matches filename
-                name = data.get("name")
+                # Check name/config_name field matches filename
+                name = data.get("config_name") or data.get("name")
                 if name != expected_name:
                     logger.warning(
                         "Skipping %s: internal name '%s' does not match filename stem '%s'",

@@ -743,13 +743,17 @@ def build_resolved_config(
     """
     # Import here to avoid circular imports
 
-    providers: dict[str, Any] = {
-        "master": {
-            "provider": template.providers.master.provider,
-            "model": template.providers.master.model,
-        },
-        "multi": [{"provider": m.provider, "model": m.model} for m in template.providers.multi],
-    }
+    providers: dict[str, Any] = {}
+    if template.providers is not None:
+        providers = {
+            "master": {
+                "provider": template.providers.master.provider,
+                "model": template.providers.master.model,
+            },
+            "multi": [
+                {"provider": m.provider, "model": m.model} for m in template.providers.multi
+            ],
+        }
     return ResolvedConfig(
         name=template.name,
         source=str(source_path),

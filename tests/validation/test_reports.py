@@ -761,6 +761,8 @@ class TestSaveValidationReportAC1:
         # Required fields per AC1
         assert metadata["type"] == "validation"
         assert metadata["validator_id"] == "claude-opus_4"
+        assert "provider" not in metadata  # Provider excluded to preserve anonymization
+        assert "model" not in metadata
         assert "timestamp" in metadata  # ISO 8601 format
         assert metadata["epic"] == 11
         assert metadata["story"] == 8

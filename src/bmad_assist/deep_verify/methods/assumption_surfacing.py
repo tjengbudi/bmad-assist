@@ -17,9 +17,10 @@ import logging
 import re
 from dataclasses import dataclass
 from enum import Enum
-from typing import Any
+from typing import Annotated, Any
 
 from pydantic import BaseModel, Field, field_validator
+from pydantic.functional_validators import BeforeValidator
 
 from bmad_assist.deep_verify.core.types import (
     ArtifactDomain,
@@ -30,6 +31,7 @@ from bmad_assist.deep_verify.core.types import (
     Severity,
 )
 from bmad_assist.deep_verify.methods.base import BaseVerificationMethod
+from bmad_assist.deep_verify.methods.validators import coerce_line_number
 from bmad_assist.providers import ClaudeSDKProvider
 
 logger = logging.getLogger(__name__)
@@ -282,7 +284,7 @@ class AssumptionFindingData(BaseModel):
     category: str = Field(...)
     violation_risk: str = Field(...)
     evidence_quote: str = Field(..., min_length=1)
-    line_number: int | None = Field(default=None)
+    line_number: Annotated[int | None, BeforeValidator(coerce_line_number)] = Field(default=None)
     consequences: str = Field(default="")
     recommendation: str = Field(default="")
 
@@ -567,7 +569,7 @@ class AssumptionSurfacingMethod(BaseVerificationMethod):
             f"- category: One of [environmental, ordering, data, timing, contract]\n"
             f"- violation_risk: One of [high, medium, low]\n"
             f"- evidence_quote: Code snippet showing where assumption is made\n"
-            f"- line_number: Line number (if identifiable)\n"
+            f"- line_number: Integer line number or null if not identifiable (NEVER use task IDs, labels, or non-numeric values)\n"
             f"- consequences: What happens if assumption is violated\n"
             f"- recommendation: How to handle or document the assumption\n\n"
             f"Respond with JSON in this format:\n"

@@ -110,17 +110,16 @@ def format_duration_cli(seconds: float) -> str:
         return f"{secs}s"
 
 
-def _setup_logging(verbose: bool, quiet: bool) -> None:
+def _setup_logging(verbose: bool, quiet: bool, debug: bool = False) -> None:
     """Configure logging based on verbosity flags.
 
     Args:
-        verbose: If True, set DEBUG level.
+        verbose: If True, set INFO level (phase progress, provider status).
         quiet: If True, set ERROR level.
+        debug: If True, set DEBUG level (detailed debug messages).
 
     Note:
-        verbose and quiet are mutually exclusive. If both are True,
-        verbose takes precedence.
-
+        Priority: debug > verbose > quiet > default.
         Default log level is WARNING (changed from INFO to reduce noise).
         Phase banners are always shown regardless of log level.
 
@@ -131,8 +130,10 @@ def _setup_logging(verbose: bool, quiet: bool) -> None:
     env_level = os.environ.get("BMAD_LOG_LEVEL", "").upper()
     if env_level in ("DEBUG", "INFO", "WARNING"):
         level = getattr(logging, env_level)
-    elif verbose:
+    elif debug:
         level = logging.DEBUG
+    elif verbose:
+        level = logging.INFO
     elif quiet:
         level = logging.ERROR
     else:

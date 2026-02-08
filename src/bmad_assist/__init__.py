@@ -1,3 +1,8 @@
 """bmad-assist - CLI tool for automating BMAD methodology development loop."""
 
-__version__ = "0.4.17"
+from importlib.metadata import version
+
+try:
+    __version__ = version("bmad-assist")
+except Exception:
+    __version__ = "0.0.0-dev"

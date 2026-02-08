@@ -222,18 +222,18 @@ class TestTimeoutHandling:
             assert result is not None
             assert isinstance(result.stderr, str)
 
-    def test_process_poll_called_for_completion_check(
+    def test_process_wait_called_for_completion_check(
         self, provider: ClaudeSubprocessProvider
     ) -> None:
-        """Test AC3: process.poll() is called to check for completion."""
+        """Test AC3: process.wait() is called to check for completion."""
         with patch("bmad_assist.providers.claude.Popen") as mock_popen:
             mock_process = create_mock_process(response_text="response")
             mock_popen.return_value = mock_process
 
             provider.invoke("Hello", timeout=60)
 
-            # poll() should be called at least once to check completion
-            assert mock_process.poll.called
+            # wait() should be called at least once to check completion
+            assert mock_process.wait.called
 
     def test_timeout_logging_with_context(
         self, provider: ClaudeSubprocessProvider, caplog: pytest.LogCaptureFixture,
@@ -315,8 +315,8 @@ class TestTimeoutValidation:
             result = provider.invoke("Hello", timeout=1)
             assert result is not None
 
-            # Verify poll() was used to check completion
-            assert mock_process.poll.called
+            # Verify wait() was used to check completion
+            assert mock_process.wait.called
 
     def test_timeout_validation_none_uses_default(self, provider: ClaudeSubprocessProvider) -> None:
         """Test AC7: timeout=None uses DEFAULT_TIMEOUT."""
@@ -326,8 +326,8 @@ class TestTimeoutValidation:
 
             provider.invoke("Hello", timeout=None)
 
-            # Verify poll() was used to check completion
-            assert mock_process.poll.called
+            # Verify wait() was used to check completion
+            assert mock_process.wait.called
 
     def test_timeout_validation_positive_accepted(self, provider: ClaudeSubprocessProvider) -> None:
         """Test AC7: Positive timeout values are accepted."""

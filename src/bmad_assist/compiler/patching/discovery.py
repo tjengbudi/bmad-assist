@@ -9,6 +9,7 @@ Functions:
     load_defaults: Load shared defaults (post_process rules, etc.)
 """
 
+import hashlib
 import logging
 from pathlib import Path
 
@@ -35,6 +36,9 @@ DEFAULTS_TESTARCH_FILENAME = "defaults-testarch.yaml"
 
 # TEA workflow prefix for detection
 TEA_WORKFLOW_PREFIX = "testarch-"
+
+# Package default_patches directory (for pip-installed fallback)
+_PACKAGE_DEFAULTS_DIR = Path(__file__).parent.parent.parent / "default_patches"
 
 
 def determine_patch_source_level(
@@ -168,7 +172,7 @@ def discover_patch(
         return global_patch
 
     # Check bmad-assist package directory (fallback for pip-installed patches)
-    package_patch = Path(__file__).parent.parent.parent / "default_patches" / patch_filename
+    package_patch = _PACKAGE_DEFAULTS_DIR / patch_filename
     if package_patch.exists() and package_patch.is_file():
         logger.debug("Found patch at package path: %s", package_patch)
         return package_patch
@@ -202,6 +206,10 @@ def _load_defaults_file(
     # Fallback to global location
     if not defaults_path.exists():
         defaults_path = Path.home() / DEFAULT_PATCH_DIR / filename
+
+    # Fallback to package default_patches (for pip-installed users)
+    if not defaults_path.exists():
+        defaults_path = _PACKAGE_DEFAULTS_DIR / filename
 
     if not defaults_path.exists():
         logger.debug("No %s found", description)
@@ -303,6 +311,76 @@ def load_defaults(
             return base_rules + tea_rules
 
     return base_rules
+
+
+def _find_defaults_file(patch_dir: Path, filename: str) -> Path | None:
+    """Locate a defaults file using the 3-tier fallback.
+
+    Searches: patch_dir → global → package default_patches.
+
+    Args:
+        patch_dir: Directory to search first.
+        filename: Defaults filename.
+
+    Returns:
+        Path if found, None otherwise.
+
+    """
+    # Patch directory
+    path = patch_dir / filename
+    if path.exists():
+        return path
+
+    # Global location
+    path = Path.home() / DEFAULT_PATCH_DIR / filename
+    if path.exists():
+        return path
+
+    # Package fallback
+    path = _PACKAGE_DEFAULTS_DIR / filename
+    if path.exists():
+        return path
+
+    return None
+
+
+def compute_defaults_hash(
+    patch_path: Path,
+    workflow_name: str | None = None,
+) -> str | None:
+    """Compute combined SHA-256 hash of applicable defaults files.
+
+    For TEA workflows, hashes defaults.yaml + defaults-testarch.yaml (if both exist).
+    For non-TEA workflows, hashes only defaults.yaml.
+
+    Args:
+        patch_path: Path to the patch file (used to find sibling defaults).
+        workflow_name: Workflow name for TEA detection.
+
+    Returns:
+        Hex digest of combined hash, or None if no defaults files exist.
+
+    """
+    patch_dir = patch_path.parent
+
+    defaults_path = _find_defaults_file(patch_dir, DEFAULTS_FILENAME)
+    if defaults_path is None:
+        return None
+
+    sha256 = hashlib.sha256()
+    with defaults_path.open("rb") as f:
+        for chunk in iter(lambda: f.read(8192), b""):
+            sha256.update(chunk)
+
+    # For TEA workflows, also include defaults-testarch.yaml
+    if workflow_name and is_tea_workflow(workflow_name):
+        tea_path = _find_defaults_file(patch_dir, DEFAULTS_TESTARCH_FILENAME)
+        if tea_path is not None:
+            with tea_path.open("rb") as f:
+                for chunk in iter(lambda: f.read(8192), b""):
+                    sha256.update(chunk)
+
+    return sha256.hexdigest()
 
 
 def load_patch(patch_path: Path) -> WorkflowPatch:

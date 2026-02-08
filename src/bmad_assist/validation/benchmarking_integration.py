@@ -442,8 +442,7 @@ async def _run_parallel_extraction(
     extraction_settings_file = None
     if config is not None and config.providers.helper:
         extraction_provider = config.providers.helper.provider
-        # Prefer model_name (e.g., "glm-4.5-air") over model (e.g., "haiku")
-        extraction_model = config.providers.helper.model_name or config.providers.helper.model
+        extraction_model = config.providers.helper.model
         settings_path = config.providers.helper.settings_path
         extraction_settings_file = str(settings_path) if settings_path else None
 

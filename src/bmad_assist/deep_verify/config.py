@@ -72,6 +72,52 @@ class DeepVerifyProviderConfig(BaseModel):
         return Path(self.settings).expanduser()
 
 
+class DeepVerifyContextConfig(BaseModel):
+    """Configuration for additional context documents in DV analysis.
+
+    Controls which strategic documents (PRD, Architecture, project-context)
+    are included alongside the story file in Deep Verify analysis.
+
+    By default, only the story file is analyzed. Users can optionally
+    include additional documents for cross-referencing.
+
+    Attributes:
+        include_prd: Include PRD in DV analysis.
+        include_architecture: Include architecture doc in DV analysis.
+        include_project_context: Include project-context.md in DV analysis.
+        max_context_size: Max combined size of context documents in bytes.
+
+    Example:
+        >>> config = DeepVerifyContextConfig(
+        ...     include_prd=True,
+        ...     include_architecture=True,
+        ...     max_context_size=51200,
+        ... )
+
+    """
+
+    model_config = ConfigDict(frozen=True)
+
+    include_prd: bool = Field(
+        default=False,
+        description="Include PRD in DV analysis",
+    )
+    include_architecture: bool = Field(
+        default=False,
+        description="Include architecture doc in DV analysis",
+    )
+    include_project_context: bool = Field(
+        default=False,
+        description="Include project-context.md in DV analysis",
+    )
+    max_context_size: int = Field(
+        default=51200,  # 50KB default
+        ge=1024,
+        le=524288,  # 512KB max allowed
+        description="Max combined size of context documents in bytes (default 50KB, max 512KB)",
+    )
+
+
 class ResourceLimitConfig(BaseModel):
     """Configuration for resource limits and error handling.
 
@@ -343,6 +389,12 @@ class DeepVerifyConfig(BaseModel):
         description="Bonus per domain with zero findings",
         ge=-10.0,
         le=10.0,
+    )
+
+    # Context configuration for validate_story phase
+    context: DeepVerifyContextConfig = Field(
+        default_factory=DeepVerifyContextConfig,
+        description="Configuration for additional context documents in DV analysis",
     )
 
     @model_validator(mode="after")

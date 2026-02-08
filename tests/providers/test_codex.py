@@ -135,7 +135,8 @@ class TestCodexProviderInvoke:
         command = call_args[0][0]
 
         # Command should include --json for JSONL streaming
-        assert command == ["codex", "exec", "Review code", "--json", "--full-auto", "-m", "o3-mini"]
+        # platform_command places prompt after base_args
+        assert command == ["codex", "exec", "--json", "--full-auto", "-m", "o3-mini", "Review code"]
 
     def test_invoke_uses_default_model_when_none(
         self, provider: CodexProvider, mock_popen_success: MagicMock
@@ -144,14 +145,15 @@ class TestCodexProviderInvoke:
         provider.invoke("Hello", model=None)
 
         command = mock_popen_success.call_args[0][0]
+        # platform_command places prompt after base_args
         assert command == [
             "codex",
             "exec",
-            "Hello",
             "--json",
             "--full-auto",
             "-m",
             "gpt-5.1-codex-max",
+            "Hello",
         ]
 
     def test_invoke_uses_default_model_when_not_specified(

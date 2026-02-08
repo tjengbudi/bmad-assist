@@ -22,7 +22,7 @@ from bmad_assist.deep_verify.methods import (
 )
 
 if TYPE_CHECKING:
-    from bmad_assist.deep_verify.config import DeepVerifyConfig
+    from bmad_assist.deep_verify.config import DeepVerifyConfig, MethodConfig
     from bmad_assist.deep_verify.infrastructure.llm_client import LLMClient
     from bmad_assist.deep_verify.methods.base import BaseVerificationMethod
 
@@ -72,12 +72,29 @@ class MethodSelector:
         self._llm_client = llm_client
         self._model = model
 
+    def _get_method_timeout(self, method_config: MethodConfig) -> int:
+        """Resolve timeout for a method.
+
+        Uses per-method timeout_seconds if set, otherwise falls back to
+        llm_config.default_timeout_seconds.
+
+        Args:
+            method_config: Per-method configuration.
+
+        Returns:
+            Timeout in seconds.
+
+        """
+        if method_config.timeout_seconds is not None:
+            return method_config.timeout_seconds
+        return self._config.llm_config.default_timeout_seconds
+
     def select(self, domains: list[ArtifactDomain]) -> list[BaseVerificationMethod]:
         """Select methods based on domains and enabled flags.
 
         If config.enabled is False, returns empty list.
         Uses default pattern library for PatternMatchMethod (no-arg constructor).
-        Respects per-method enabled flags from config.
+        Respects per-method enabled flags and timeout_seconds from config.
 
         Args:
             domains: List of detected artifact domains.
@@ -88,6 +105,18 @@ class MethodSelector:
         """
         if not self._config.enabled:
             return []
+
+        # Map method IDs to their per-method config for timeout resolution
+        method_configs: dict[str, MethodConfig] = {
+            "#153": self._config.method_153_pattern_match,
+            "#154": self._config.method_154_boundary_analysis,
+            "#155": self._config.method_155_assumption_surfacing,
+            "#157": self._config.method_157_temporal_consistency,
+            "#201": self._config.method_201_adversarial_review,
+            "#203": self._config.method_203_domain_expert,
+            "#204": self._config.method_204_integration_analysis,
+            "#205": self._config.method_205_worst_case,
+        }
 
         methods: list[BaseVerificationMethod] = []
         added_method_ids: set[str] = set()  # Track added methods to prevent duplicates
@@ -103,12 +132,19 @@ class MethodSelector:
             Args:
                 method_id: Method ID for deduplication.
                 factory: Method class/factory.
-                needs_llm: If True, passes llm_client and model to factory.
+                needs_llm: If True, passes llm_client, model, and timeout to factory.
 
             """
             if method_id not in added_method_ids:
+                timeout = self._get_method_timeout(method_configs[method_id])
                 if needs_llm and self._llm_client is not None:
-                    methods.append(factory(llm_client=self._llm_client, model=self._model))
+                    methods.append(
+                        factory(
+                            llm_client=self._llm_client,
+                            model=self._model,
+                            timeout=timeout,
+                        )
+                    )
                 else:
                     methods.append(factory())
                 added_method_ids.add(method_id)

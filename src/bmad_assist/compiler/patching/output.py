@@ -24,6 +24,7 @@ class TemplateMetadata:
         bmad_version: Version of bmad_assist.
         compiled_at: ISO 8601 timestamp of compilation.
         source_hash: SHA-256 hash of source files.
+        defaults_hash: Combined SHA-256 of defaults files, or None.
         is_markdown: Whether the output is markdown (vs XML).
 
     """
@@ -34,6 +35,7 @@ class TemplateMetadata:
     bmad_version: str
     compiled_at: str
     source_hash: str
+    defaults_hash: str | None = None
     is_markdown: bool = False
 
 
@@ -59,6 +61,8 @@ def generate_template(content: str, metadata: TemplateMetadata) -> str:
         f"Compiled at: {metadata.compiled_at}",
         f"Source hash: {metadata.source_hash}",
     ]
+    if metadata.defaults_hash is not None:
+        content_lines.append(f"Defaults hash: {metadata.defaults_hash}")
 
     # Format as markdown or XML comment based on output type
     if metadata.is_markdown:

@@ -329,3 +329,242 @@ class TestTemplateCache:
         )
 
         assert result is True
+
+    # --- defaults_hash tests ---
+
+    def test_cache_meta_with_defaults_hash(self) -> None:
+        """CacheMeta creation with defaults_hash field."""
+        meta = CacheMeta(
+            compiled_at="2026-01-01T00:00:00Z",
+            bmad_version="6.0",
+            source_hashes={"workflow.yaml": "abc"},
+            patch_hash="def",
+            defaults_hash="ghi",
+        )
+        assert meta.defaults_hash == "ghi"
+
+    def test_cache_meta_defaults_hash_default_none(self) -> None:
+        """CacheMeta defaults_hash defaults to None."""
+        meta = CacheMeta(
+            compiled_at="2026-01-01T00:00:00Z",
+            bmad_version="6.0",
+            source_hashes={},
+            patch_hash="abc",
+        )
+        assert meta.defaults_hash is None
+
+    def test_is_valid_defaults_hash_mismatch(self, tmp_path: Path) -> None:
+        """Cache invalid when defaults_hash changes (both non-None, different)."""
+        cache = TemplateCache()
+
+        source_file = tmp_path / "workflow.yaml"
+        source_file.write_text("source")
+        patch_file = tmp_path / "patch.yaml"
+        patch_file.write_text("patch")
+
+        cache_dir = tmp_path / ".bmad-assist" / "cache"
+        cache_dir.mkdir(parents=True)
+        (cache_dir / "test.tpl.xml").write_text("<compiled/>")
+
+        meta = {
+            "compiled_at": "2026-01-01T00:00:00Z",
+            "bmad_version": "6.0",
+            "source_hashes": {"workflow.yaml": compute_file_hash(source_file)},
+            "patch_hash": compute_file_hash(patch_file),
+            "defaults_hash": "old_defaults_hash",
+        }
+        (cache_dir / "test.tpl.xml.meta.yaml").write_text(yaml.dump(meta))
+
+        result = cache.is_valid(
+            workflow="test",
+            project_root=tmp_path,
+            source_files={"workflow.yaml": source_file},
+            patch_path=patch_file,
+            defaults_hash="new_defaults_hash",
+        )
+        assert result is False
+
+    def test_is_valid_defaults_hash_none_stored_skips(self, tmp_path: Path) -> None:
+        """Old meta without defaults_hash + non-None current → PASSES (backward compat)."""
+        cache = TemplateCache()
+
+        source_file = tmp_path / "workflow.yaml"
+        source_file.write_text("source")
+        patch_file = tmp_path / "patch.yaml"
+        patch_file.write_text("patch")
+
+        cache_dir = tmp_path / ".bmad-assist" / "cache"
+        cache_dir.mkdir(parents=True)
+        (cache_dir / "test.tpl.xml").write_text("<compiled/>")
+
+        meta = {
+            "compiled_at": "2026-01-01T00:00:00Z",
+            "bmad_version": "6.0",
+            "source_hashes": {"workflow.yaml": compute_file_hash(source_file)},
+            "patch_hash": compute_file_hash(patch_file),
+            # No defaults_hash key (old cache)
+        }
+        (cache_dir / "test.tpl.xml.meta.yaml").write_text(yaml.dump(meta))
+
+        result = cache.is_valid(
+            workflow="test",
+            project_root=tmp_path,
+            source_files={"workflow.yaml": source_file},
+            patch_path=patch_file,
+            defaults_hash="current_hash",
+        )
+        assert result is True
+
+    def test_is_valid_defaults_hash_none_current_skips(self, tmp_path: Path) -> None:
+        """Non-None stored + None current → PASSES (skip comparison)."""
+        cache = TemplateCache()
+
+        source_file = tmp_path / "workflow.yaml"
+        source_file.write_text("source")
+        patch_file = tmp_path / "patch.yaml"
+        patch_file.write_text("patch")
+
+        cache_dir = tmp_path / ".bmad-assist" / "cache"
+        cache_dir.mkdir(parents=True)
+        (cache_dir / "test.tpl.xml").write_text("<compiled/>")
+
+        meta = {
+            "compiled_at": "2026-01-01T00:00:00Z",
+            "bmad_version": "6.0",
+            "source_hashes": {"workflow.yaml": compute_file_hash(source_file)},
+            "patch_hash": compute_file_hash(patch_file),
+            "defaults_hash": "stored_hash",
+        }
+        (cache_dir / "test.tpl.xml.meta.yaml").write_text(yaml.dump(meta))
+
+        result = cache.is_valid(
+            workflow="test",
+            project_root=tmp_path,
+            source_files={"workflow.yaml": source_file},
+            patch_path=patch_file,
+            defaults_hash=None,
+        )
+        assert result is True
+
+    def test_is_valid_defaults_hash_both_none_skips(self, tmp_path: Path) -> None:
+        """Both None → PASSES."""
+        cache = TemplateCache()
+
+        source_file = tmp_path / "workflow.yaml"
+        source_file.write_text("source")
+        patch_file = tmp_path / "patch.yaml"
+        patch_file.write_text("patch")
+
+        cache_dir = tmp_path / ".bmad-assist" / "cache"
+        cache_dir.mkdir(parents=True)
+        (cache_dir / "test.tpl.xml").write_text("<compiled/>")
+
+        meta = {
+            "compiled_at": "2026-01-01T00:00:00Z",
+            "bmad_version": "6.0",
+            "source_hashes": {"workflow.yaml": compute_file_hash(source_file)},
+            "patch_hash": compute_file_hash(patch_file),
+            # No defaults_hash
+        }
+        (cache_dir / "test.tpl.xml.meta.yaml").write_text(yaml.dump(meta))
+
+        result = cache.is_valid(
+            workflow="test",
+            project_root=tmp_path,
+            source_files={"workflow.yaml": source_file},
+            patch_path=patch_file,
+            defaults_hash=None,
+        )
+        assert result is True
+
+    def test_save_and_load_with_defaults_hash(self, tmp_path: Path) -> None:
+        """Round-trip save/load preserves defaults_hash."""
+        cache = TemplateCache()
+        meta = CacheMeta(
+            compiled_at="2026-01-01T00:00:00Z",
+            bmad_version="6.0",
+            source_hashes={"workflow.yaml": "abc"},
+            patch_hash="def",
+            defaults_hash="ghi_defaults",
+        )
+        cache.save("test-wf", "<compiled/>", meta, tmp_path)
+
+        # Load meta from disk
+        meta_path = tmp_path / ".bmad-assist" / "cache" / "test-wf.tpl.xml.meta.yaml"
+        with meta_path.open() as f:
+            loaded = yaml.safe_load(f)
+
+        assert loaded["defaults_hash"] == "ghi_defaults"
+
+    def test_is_valid_with_template_md_hash(self, tmp_path: Path) -> None:
+        """source_hashes includes template.md, changes invalidate cache."""
+        cache = TemplateCache()
+
+        source_file = tmp_path / "workflow.yaml"
+        source_file.write_text("source")
+        template_file = tmp_path / "template.md"
+        template_file.write_text("# Template v1")
+        patch_file = tmp_path / "patch.yaml"
+        patch_file.write_text("patch")
+
+        cache_dir = tmp_path / ".bmad-assist" / "cache"
+        cache_dir.mkdir(parents=True)
+        (cache_dir / "test.tpl.xml").write_text("<compiled/>")
+
+        meta = {
+            "compiled_at": "2026-01-01T00:00:00Z",
+            "bmad_version": "6.0",
+            "source_hashes": {
+                "workflow.yaml": compute_file_hash(source_file),
+                "template.md": compute_file_hash(template_file),
+            },
+            "patch_hash": compute_file_hash(patch_file),
+        }
+        (cache_dir / "test.tpl.xml.meta.yaml").write_text(yaml.dump(meta))
+
+        # Valid with original template
+        assert cache.is_valid(
+            workflow="test",
+            project_root=tmp_path,
+            source_files={"workflow.yaml": source_file, "template.md": template_file},
+            patch_path=patch_file,
+        ) is True
+
+        # Modify template.md → invalid
+        template_file.write_text("# Template v2 - CHANGED")
+        assert cache.is_valid(
+            workflow="test",
+            project_root=tmp_path,
+            source_files={"workflow.yaml": source_file, "template.md": template_file},
+            patch_path=patch_file,
+        ) is False
+
+    def test_cache_valid_when_no_template_md(self, tmp_path: Path) -> None:
+        """Workflows without template.md validate correctly (absent from source_hashes)."""
+        cache = TemplateCache()
+
+        source_file = tmp_path / "workflow.yaml"
+        source_file.write_text("source")
+        patch_file = tmp_path / "patch.yaml"
+        patch_file.write_text("patch")
+
+        cache_dir = tmp_path / ".bmad-assist" / "cache"
+        cache_dir.mkdir(parents=True)
+        (cache_dir / "test.tpl.xml").write_text("<compiled/>")
+
+        # No template.md in source_hashes
+        meta = {
+            "compiled_at": "2026-01-01T00:00:00Z",
+            "bmad_version": "6.0",
+            "source_hashes": {"workflow.yaml": compute_file_hash(source_file)},
+            "patch_hash": compute_file_hash(patch_file),
+        }
+        (cache_dir / "test.tpl.xml.meta.yaml").write_text(yaml.dump(meta))
+
+        result = cache.is_valid(
+            workflow="test",
+            project_root=tmp_path,
+            source_files={"workflow.yaml": source_file},
+            patch_path=patch_file,
+        )
+        assert result is True

@@ -143,6 +143,7 @@ class ValidateStoryHandler(BaseHandler):
                         epic=epic_num,
                         story=story_num,
                         output_dir=deep_verify_dir,
+                        phase_type="story-validation",
                     )
                 except Exception as e:
                     logger.warning("Failed to save Deep Verify report: %s", e)

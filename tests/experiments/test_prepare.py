@@ -412,7 +412,7 @@ class TestExtractEssentialMetrics:
         assert metrics["dur_ms"] == 45000
         assert metrics["tokens"] == 2500
         assert metrics["findings"]["total"] == 5
-        assert metrics["quality"]["actionable"] == 0.8
+        assert "quality" not in metrics
 
     def test_extract_minimal_record(self) -> None:
         """Test extracting from minimal record."""
@@ -425,7 +425,6 @@ class TestExtractEssentialMetrics:
         assert metrics["role"] == "synthesizer"
         assert metrics["dur_ms"] == 0
         assert "findings" not in metrics
-        assert "quality" not in metrics
 
 
 class TestCalculateAggregates:

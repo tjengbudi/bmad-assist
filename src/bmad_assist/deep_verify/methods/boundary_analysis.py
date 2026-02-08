@@ -5,6 +5,8 @@ edge cases via domain-specific checklists analyzed by an LLM.
 
 Method #154 is one of two methods that always run regardless of domain
 detection results (the other being #153 Pattern Match).
+
+All checklist items are evaluated in a single batched LLM call per artifact.
 """
 
 from __future__ import annotations
@@ -49,38 +51,41 @@ __all__ = [
 # =============================================================================
 
 DEFAULT_MODEL = "haiku"
-DEFAULT_TIMEOUT = 30
+DEFAULT_TIMEOUT = 60
 DEFAULT_THRESHOLD = 0.6
 MAX_ARTIFACT_LENGTH = 3000
-MAX_CONCURRENT_LLM_CALLS = 3
 
 # =============================================================================
 # System Prompt
 # =============================================================================
 
 BOUNDARY_ANALYSIS_SYSTEM_PROMPT = """You are a boundary analysis expert for code review.
-Analyze the provided artifact against a specific edge case checklist item.
+Analyze the provided artifact against ALL checklist items below.
 
 Your task:
-1. Determine if the artifact properly handles the described edge case
+1. For EACH checklist item, determine if the artifact properly handles the described edge case
 2. If NOT handled (violated), provide evidence from the code
-3. Return a structured JSON response
+3. Return a JSON array with one entry per checklist item
 
-Response format:
-{
-    "violated": true/false,
-    "confidence": 0.0-1.0,
-    "evidence_quote": "Relevant code snippet showing the issue (if violated)",
-    "line_number": 123,
-    "explanation": "Brief explanation of why this is/isn't a concern"
-}
+Response format (JSON array only, no other text):
+[
+    {
+        "id": "CHECKLIST-ID",
+        "violated": true/false,
+        "confidence": 0.0-1.0,
+        "evidence_quote": "Relevant code snippet (if violated, else empty string)",
+        "line_number": 123,
+        "explanation": "Brief explanation"
+    }
+]
 
 Rules:
+- Return one entry per checklist item, using the exact checklist ID
 - "violated" = true means the edge case is NOT properly handled
 - confidence should reflect how certain you are (0.5 = uncertain, 0.9 = very certain)
-- evidence_quote must be verbatim from the artifact
-- line_number should be accurate if identifiable (1-indexed)
-- If the edge case is properly handled, set violated=false and provide brief explanation"""
+- evidence_quote must be verbatim from the artifact (empty string if not violated)
+- line_number should be accurate if identifiable, null otherwise
+- Only include items where you have a clear assessment"""
 
 
 # =============================================================================
@@ -177,11 +182,12 @@ class ChecklistYaml(BaseModel):
 class ChecklistAnalysisResponse(BaseModel):
     """Expected LLM response structure for checklist analysis."""
 
+    id: str = ""
     violated: bool
     confidence: float = Field(ge=0.0, le=1.0)
-    evidence_quote: str = ""
+    evidence_quote: str | None = ""
     line_number: int | None = None
-    explanation: str = ""
+    explanation: str | None = ""
 
 
 # =============================================================================
@@ -299,8 +305,8 @@ class BoundaryAnalysisMethod(BaseVerificationMethod):
     """Boundary Analysis Method (#154) - Edge case detection via checklists.
 
     This method analyzes artifact text against domain-specific checklists
-    using LLM-based analysis to identify unhandled edge cases and boundary
-    conditions that pattern matching might miss.
+    using a single batched LLM call to identify unhandled edge cases and
+    boundary conditions that pattern matching might miss.
 
     Attributes:
         method_id: Unique method identifier "#154".
@@ -336,7 +342,7 @@ class BoundaryAnalysisMethod(BaseVerificationMethod):
                           If None, uses default location.
             model: Model identifier for LLM calls (default: "haiku").
             threshold: Minimum confidence threshold for findings (default: 0.6).
-            timeout: Timeout in seconds for LLM calls (default: 30).
+            timeout: Timeout in seconds for LLM calls (default: 60).
             llm_client: Optional LLMClient for managed LLM calls. If provided,
                        uses LLMClient (with retry, rate limiting, cost tracking).
                        If None, creates direct ClaudeSDKProvider.
@@ -374,7 +380,7 @@ class BoundaryAnalysisMethod(BaseVerificationMethod):
         artifact_text: str,
         **kwargs: dict[str, object],
     ) -> list[Finding]:
-        """Analyze artifact against boundary checklists.
+        """Analyze artifact against all boundary checklists in a single LLM call.
 
         Args:
             artifact_text: The text content to analyze for boundary issues.
@@ -404,42 +410,30 @@ class BoundaryAnalysisMethod(BaseVerificationMethod):
                 return []
 
             logger.debug(
-                "Analyzing artifact against %d checklist items (domains=%s)",
+                "Analyzing artifact against %d checklist items in single batch (domains=%s)",
                 len(checklist_items),
                 domains,
             )
 
-            # Analyze each checklist item in parallel with semaphore for rate limiting
-            semaphore = asyncio.Semaphore(MAX_CONCURRENT_LLM_CALLS)
+            # Single batched LLM call with all checklist items
+            responses = await asyncio.to_thread(
+                self._analyze_all_items_sync, artifact_text, checklist_items
+            )
 
-            async def analyze_with_limit(
-                item: ChecklistItem,
-            ) -> tuple[ChecklistAnalysisResponse, ChecklistItem] | None:
-                async with semaphore:
-                    try:
-                        # Run sync LLM call in thread pool to avoid blocking
-                        result = await asyncio.to_thread(
-                            self._analyze_checklist_item_sync, artifact_text, item
-                        )
-                        if result.violated and result.confidence >= self._threshold:
-                            # Return tuple of (finding_data, item) for ID assignment later
-                            return (result, item)
-                    except Exception as e:
-                        logger.warning("Checklist analysis failed for %s: %s", item.id, e)
-                    return None
+            # Build lookup for checklist items by ID
+            items_by_id = {item.id: item for item in checklist_items}
 
-            # Run all analyses in parallel
-            tasks = [analyze_with_limit(item) for item in checklist_items]
-            results = await asyncio.gather(*tasks)
-
-            # Collect results and assign sequential IDs to avoid gaps
+            # Collect findings from batch response
             findings: list[Finding] = []
             finding_idx = 0
-            for result in results:
-                if result is not None:
-                    result_data, item = result
+            for resp in responses:
+                if resp.violated and resp.confidence >= self._threshold:
+                    item = items_by_id.get(resp.id)
+                    if item is None:
+                        logger.debug("LLM returned unknown checklist ID: %s", resp.id)
+                        continue
                     finding_idx += 1
-                    findings.append(self._create_finding(result_data, item, finding_idx))
+                    findings.append(self._create_finding(resp, item, finding_idx))
 
             logger.debug(
                 "Boundary analysis found %d violations (threshold=%.2f)",
@@ -453,29 +447,24 @@ class BoundaryAnalysisMethod(BaseVerificationMethod):
             logger.warning("Boundary analysis failed: %s", e, exc_info=True)
             return []
 
-    def _analyze_checklist_item_sync(
+    def _analyze_all_items_sync(
         self,
         artifact_text: str,
-        item: ChecklistItem,
-    ) -> ChecklistAnalysisResponse:
-        """Analyze single checklist item using LLM.
-
-        Uses LLMClient if available, otherwise falls back to direct provider.
+        items: list[ChecklistItem],
+    ) -> list[ChecklistAnalysisResponse]:
+        """Analyze all checklist items in a single batched LLM call.
 
         Args:
             artifact_text: The text to analyze.
-            item: The checklist item to evaluate.
+            items: All checklist items to evaluate.
 
         Returns:
-            ChecklistAnalysisResponse with analysis results.
+            List of ChecklistAnalysisResponse, one per checklist item.
 
         """
-        prompt = self._build_prompt(artifact_text, item)
+        prompt = self._build_batch_prompt(artifact_text, items)
 
         if self._llm_client:
-            # Use LLMClient for managed calls (async bridge)
-            # CRITICAL: Use run_async_in_thread() instead of asyncio.run() to avoid
-            # shutting down the default executor (which the outer event loop uses)
             from bmad_assist.core.async_utils import run_async_in_thread
 
             result = run_async_in_thread(
@@ -488,7 +477,6 @@ class BoundaryAnalysisMethod(BaseVerificationMethod):
             )
             raw_response = result.stdout
         else:
-            # Direct provider call (legacy fallback)
             assert self._provider is not None
             result = self._provider.invoke(
                 prompt=prompt,
@@ -497,76 +485,123 @@ class BoundaryAnalysisMethod(BaseVerificationMethod):
             )
             raw_response = self._provider.parse_output(result)
 
-        return self._parse_response(raw_response)
+        return self._parse_batch_response(raw_response)
 
-    def _build_prompt(self, artifact_text: str, item: ChecklistItem) -> str:
-        """Build the prompt for LLM checklist analysis.
+    def _build_batch_prompt(self, artifact_text: str, items: list[ChecklistItem]) -> str:
+        """Build a single prompt containing all checklist items.
 
         Args:
             artifact_text: The text to analyze.
-            item: The checklist item to evaluate.
+            items: All checklist items to evaluate.
 
         Returns:
             Formatted prompt string.
 
         """
         truncated = artifact_text[:MAX_ARTIFACT_LENGTH]
+
+        checklist_section = []
+        for i, item in enumerate(items, 1):
+            checklist_section.append(
+                f"{i}. ID: {item.id}\n"
+                f"   Category: {item.category}\n"
+                f"   Question: {item.question}\n"
+                f"   Description: {item.description}"
+            )
+
         return (
             f"{BOUNDARY_ANALYSIS_SYSTEM_PROMPT}\n\n"
             f"Artifact to analyze:\n```\n{truncated}\n```\n\n"
-            f"Checklist item to evaluate:\n"
-            f"ID: {item.id}\n"
-            f"Category: {item.category}\n"
-            f"Question: {item.question}\n"
-            f"Description: {item.description}\n\n"
-            f"Analyze whether this artifact properly handles the described edge case. "
-            f"Respond with JSON only."
+            f"Checklist items to evaluate ({len(items)} items):\n\n"
+            + "\n\n".join(checklist_section)
+            + "\n\nAnalyze the artifact against ALL checklist items above. "
+            "Respond with a JSON array only."
         )
 
-    def _parse_response(self, raw_response: str) -> ChecklistAnalysisResponse:
-        """Parse LLM response with robust JSON extraction.
+    def _parse_batch_response(self, raw_response: str) -> list[ChecklistAnalysisResponse]:
+        """Parse batched LLM response containing array of checklist results.
 
         Handles:
-        - JSON inside markdown code blocks (```json...```)
-        - Raw JSON objects
-        - Nested braces by tracking depth
+        - JSON array inside markdown code blocks
+        - Raw JSON arrays
+        - Fallback: extract individual JSON objects
 
         Args:
             raw_response: Raw text response from LLM.
 
         Returns:
-            Parsed ChecklistAnalysisResponse.
-
-        Raises:
-            ValueError: If response cannot be parsed.
+            List of ChecklistAnalysisResponse objects.
 
         """
-        # Try to extract from markdown code block
-        match = re.search(r"```(?:json)?\s*(\{.*?\})\s*```", raw_response, re.DOTALL)
+        # Try markdown code block with array
+        match = re.search(r"```(?:json)?\s*(\[.*?\])\s*```", raw_response, re.DOTALL)
         if match:
             json_str = match.group(1)
         else:
-            # Find JSON by matching braces - handle nested objects
-            brace_depth = 0
+            # Find JSON array by matching brackets
+            bracket_depth = 0
             start_idx = -1
             json_str = ""
             for i, char in enumerate(raw_response):
-                if char == "{":
-                    if brace_depth == 0:
+                if char == "[":
+                    if bracket_depth == 0:
                         start_idx = i
-                    brace_depth += 1
-                elif char == "}":
-                    brace_depth -= 1
-                    if brace_depth == 0 and start_idx >= 0:
+                    bracket_depth += 1
+                elif char == "]":
+                    bracket_depth -= 1
+                    if bracket_depth == 0 and start_idx >= 0:
                         json_str = raw_response[start_idx : i + 1]
                         break
 
             if not json_str:
-                raise ValueError("No JSON found in response")
+                # Last resort: try to find individual JSON objects
+                return self._parse_individual_objects(raw_response)
 
-        # Parse with Pydantic validation
         data = json.loads(json_str)
-        return ChecklistAnalysisResponse(**data)
+        if not isinstance(data, list):
+            raise ValueError("Expected JSON array in response")
+
+        responses = []
+        for entry in data:
+            try:
+                responses.append(ChecklistAnalysisResponse(**entry))
+            except Exception as e:
+                logger.debug("Skipping malformed batch entry: %s", e)
+        return responses
+
+    def _parse_individual_objects(self, raw_response: str) -> list[ChecklistAnalysisResponse]:
+        """Fallback parser: extract individual JSON objects from response.
+
+        Args:
+            raw_response: Raw text that may contain multiple JSON objects.
+
+        Returns:
+            List of parsed responses.
+
+        """
+        responses = []
+        brace_depth = 0
+        start_idx = -1
+
+        for i, char in enumerate(raw_response):
+            if char == "{":
+                if brace_depth == 0:
+                    start_idx = i
+                brace_depth += 1
+            elif char == "}":
+                brace_depth -= 1
+                if brace_depth == 0 and start_idx >= 0:
+                    json_str = raw_response[start_idx : i + 1]
+                    try:
+                        data = json.loads(json_str)
+                        responses.append(ChecklistAnalysisResponse(**data))
+                    except Exception:
+                        pass
+                    start_idx = -1
+
+        if not responses:
+            logger.warning("No valid JSON found in boundary analysis response")
+        return responses
 
     def _create_finding(
         self,

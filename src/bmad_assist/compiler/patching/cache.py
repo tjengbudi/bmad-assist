@@ -59,6 +59,7 @@ class CacheMeta:
         bmad_version: Version of bmad_assist that compiled the template.
         source_hashes: Dict mapping file paths to SHA-256 hex digests.
         patch_hash: SHA-256 hex digest of patch file content.
+        defaults_hash: Combined SHA-256 of defaults files, or None if no defaults.
 
     """
 
@@ -66,6 +67,7 @@ class CacheMeta:
     bmad_version: str
     source_hashes: dict[str, str]
     patch_hash: str
+    defaults_hash: str | None = None
 
 
 class TemplateCache:
@@ -113,6 +115,7 @@ class TemplateCache:
         project_root: Path | None,
         source_files: dict[str, Path],
         patch_path: Path,
+        defaults_hash: str | None = None,
     ) -> bool:
         """Check if cached template is valid.
 
@@ -185,6 +188,20 @@ class TemplateCache:
                 )
                 return False
 
+            # Check defaults_hash (backward compat: skip if either is None)
+            stored_defaults_hash = meta_data.get("defaults_hash")
+            if (
+                stored_defaults_hash is not None
+                and defaults_hash is not None
+                and stored_defaults_hash != defaults_hash
+            ):
+                logger.debug(
+                    "Defaults hash mismatch: cached=%s, current=%s",
+                    stored_defaults_hash,
+                    defaults_hash,
+                )
+                return False
+
             return True
 
         except Exception as e:
@@ -251,12 +268,14 @@ class TemplateCache:
             ) from e
 
         # Prepare metadata dict
-        meta_dict = {
+        meta_dict: dict[str, str | dict[str, str] | None] = {
             "compiled_at": metadata.compiled_at,
             "bmad_version": metadata.bmad_version,
             "source_hashes": metadata.source_hashes,
             "patch_hash": metadata.patch_hash,
         }
+        if metadata.defaults_hash is not None:
+            meta_dict["defaults_hash"] = metadata.defaults_hash
 
         # Atomic write for template
         temp_path = cache_path.with_suffix(".tmp")

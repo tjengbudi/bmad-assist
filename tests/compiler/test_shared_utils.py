@@ -584,3 +584,411 @@ class TestEstimateTokensAC2:
         content = "0123456789\n" * 5
         result = estimate_tokens(content)
         assert result == 13  # 55 / 4 = 13 (integer division)
+
+
+class TestFormatDvFindingsForPrompt:
+    """Tests for format_dv_findings_for_prompt()."""
+
+    def _make_findings(self, **overrides: object) -> dict:
+        """Build a code_review handler-style DV findings dict."""
+        base: dict = {
+            "verdict": "REJECT",
+            "score": 8.5,
+            "findings_count": 1,
+            "critical_count": 1,
+            "error_count": 0,
+            "domains": [{"domain": "security", "confidence": 0.95}],
+            "methods": ["#153"],
+            "findings": [
+                {
+                    "id": "F1",
+                    "severity": "critical",
+                    "title": "SQL Injection Risk",
+                    "description": "User input not sanitized",
+                    "method": "#153",
+                    "domain": "security",
+                    "evidence": [
+                        {"quote": 'query = f"SELECT * FROM {table}"', "line_number": 42}
+                    ],
+                }
+            ],
+        }
+        base.update(overrides)
+        return base
+
+    def _make_serialize_findings(self, **overrides: object) -> dict:
+        """Build a serialize_validation_result-style DV findings dict."""
+        base: dict = {
+            "verdict": "REJECT",
+            "score": 7.0,
+            "domains_detected": [{"domain": "concurrency", "confidence": 0.8}],
+            "methods_executed": ["#201", "#202"],
+            "findings": [
+                {
+                    "id": "F1",
+                    "severity": "error",
+                    "title": "Race Condition",
+                    "description": "Shared state without lock",
+                    "method_id": "#201",
+                    "domain": "concurrency",
+                    "evidence": [
+                        {"quote": "self.data[key] = value", "line_number": 99, "confidence": 0.9}
+                    ],
+                }
+            ],
+        }
+        base.update(overrides)
+        return base
+
+    def test_basic_formatting(self) -> None:
+        """Basic code_review handler format produces expected markdown."""
+        from bmad_assist.compiler.shared_utils import format_dv_findings_for_prompt
+
+        result = format_dv_findings_for_prompt(self._make_findings())
+        assert "# Deep Verify Analysis Results" in result
+        assert "**Verdict:** REJECT" in result
+        assert "**Score:** 8.5" in result
+        assert "SQL Injection Risk" in result
+        assert "Line 42" in result
+        assert "**Method:** #153" in result
+
+    def test_serialize_format(self) -> None:
+        """serialize_validation_result format (domains_detected/methods_executed/method_id)."""
+        from bmad_assist.compiler.shared_utils import format_dv_findings_for_prompt
+
+        result = format_dv_findings_for_prompt(self._make_serialize_findings())
+        assert "**Verdict:** REJECT" in result
+        assert "concurrency" in result
+        assert "#201" in result
+        assert "Race Condition" in result
+        assert "**Method:** #201" in result
+        assert "Line 99" in result
+
+    def test_counts_computed_from_findings_when_missing(self) -> None:
+        """When pre-computed count fields absent, compute from findings list."""
+        from bmad_assist.compiler.shared_utils import format_dv_findings_for_prompt
+
+        data = self._make_serialize_findings()
+        # serialize format has no count fields
+        assert "findings_count" not in data
+        result = format_dv_findings_for_prompt(data)
+        assert "**Findings:** 1 " in result
+        assert "(0 critical, 1 error)" in result
+
+    def test_invalid_input_returns_fallback(self) -> None:
+        """Non-dict input returns safe fallback string."""
+        from bmad_assist.compiler.shared_utils import format_dv_findings_for_prompt
+
+        assert "No data available" in format_dv_findings_for_prompt("not a dict")  # type: ignore[arg-type]
+        assert "No data available" in format_dv_findings_for_prompt(None)  # type: ignore[arg-type]
+
+    def test_empty_findings_no_orphan_header(self) -> None:
+        """Empty findings list doesn't produce orphan ## Findings header."""
+        from bmad_assist.compiler.shared_utils import format_dv_findings_for_prompt
+
+        data = self._make_findings(findings=[])
+        result = format_dv_findings_for_prompt(data)
+        assert "## Findings" not in result
+
+    def test_malformed_domain_skipped(self) -> None:
+        """Non-dict domain entries are skipped gracefully."""
+        from bmad_assist.compiler.shared_utils import format_dv_findings_for_prompt
+
+        data = self._make_findings(domains=["not-a-dict", {"domain": "security", "confidence": 0.9}])
+        result = format_dv_findings_for_prompt(data)
+        assert "security" in result
+        # no crash
+
+    def test_line_number_without_quote(self) -> None:
+        """Line number shown even when quote is empty."""
+        from bmad_assist.compiler.shared_utils import format_dv_findings_for_prompt
+
+        data = self._make_findings(
+            findings=[
+                {
+                    "id": "F1",
+                    "severity": "warning",
+                    "title": "Test",
+                    "description": "desc",
+                    "method": "#1",
+                    "evidence": [{"quote": "", "line_number": 77}],
+                }
+            ]
+        )
+        result = format_dv_findings_for_prompt(data)
+        assert "Line 77" in result
+
+    def test_no_findings_no_domains_no_methods(self) -> None:
+        """Minimal dict with no optional fields still produces valid output."""
+        from bmad_assist.compiler.shared_utils import format_dv_findings_for_prompt
+
+        result = format_dv_findings_for_prompt({"verdict": "ACCEPT", "score": 0.0})
+        assert "**Verdict:** ACCEPT" in result
+        assert "## Findings" not in result
+        assert "None" in result  # methods fallback
+
+
+class TestPrioritizeFindings:
+    """Tests for _prioritize_findings() helper."""
+
+    def _make_finding(
+        self,
+        finding_id: str = "F1",
+        severity: str = "warning",
+        domain: str = "security",
+        file_path: str = "src/app.py",
+        confidence: float = 0.8,
+        line_number: int = 10,
+    ) -> dict:
+        return {
+            "id": finding_id,
+            "severity": severity,
+            "title": f"Finding {finding_id}",
+            "description": f"Description for {finding_id}",
+            "method": "#153",
+            "domain": domain,
+            "file_path": file_path,
+            "evidence": [
+                {"quote": "code here", "line_number": line_number, "confidence": confidence}
+            ],
+        }
+
+    def test_prioritize_critical_never_truncated(self) -> None:
+        """25 critical findings with max_findings=20 -> all 25 included."""
+        from bmad_assist.compiler.shared_utils import _prioritize_findings
+
+        findings = [
+            self._make_finding(f"F{i}", severity="critical", confidence=0.9)
+            for i in range(25)
+        ]
+        result, omitted, omitted_by_sev = _prioritize_findings(findings, max_findings=20)
+        assert len(result) == 25
+        assert omitted == 0
+        assert omitted_by_sev == {}
+
+    def test_prioritize_sort_order(self) -> None:
+        """Verify severity -> domain_conf -> file -> evidence_conf ordering."""
+        from bmad_assist.compiler.shared_utils import _prioritize_findings
+
+        findings = [
+            self._make_finding("F1", severity="warning", domain="a", confidence=0.5),
+            self._make_finding("F2", severity="critical", domain="b", confidence=0.3),
+            self._make_finding("F3", severity="error", domain="c", confidence=0.9),
+            self._make_finding("F4", severity="info", domain="d", confidence=0.99),
+        ]
+        result, _, _ = _prioritize_findings(findings, max_findings=50)
+        severities = [f["severity"] for f in result]
+        assert severities == ["critical", "error", "warning", "info"]
+
+    def test_prioritize_domain_integrity(self) -> None:
+        """Domain group of 5 at budget edge -> included with overflow; group of 8 -> skipped."""
+        from bmad_assist.compiler.shared_utils import _prioritize_findings
+
+        # 3 criticals + budget for 2 more = 5 total budget
+        criticals = [
+            self._make_finding(f"C{i}", severity="critical") for i in range(3)
+        ]
+        # A domain group of 5 warnings (within overflow_tolerance=6)
+        small_group = [
+            self._make_finding(f"S{i}", severity="warning", domain="small-domain")
+            for i in range(5)
+        ]
+        # A domain group of 8 warnings (exceeds overflow_tolerance=6)
+        big_group = [
+            self._make_finding(f"B{i}", severity="warning", domain="big-domain", confidence=0.1)
+            for i in range(8)
+        ]
+
+        findings = criticals + small_group + big_group
+        result, omitted, omitted_by_sev = _prioritize_findings(
+            findings, max_findings=5, overflow_tolerance=6
+        )
+
+        # 3 criticals + budget=2 filled from small_group + remaining 3 within overflow
+        included_ids = {f["id"] for f in result}
+        # All criticals included
+        for i in range(3):
+            assert f"C{i}" in included_ids
+        # Small group (5 items) should be included via overflow tolerance
+        for i in range(5):
+            assert f"S{i}" in included_ids
+        # Big group (8 items) exceeds overflow tolerance -> skipped
+        assert omitted == 8
+        assert omitted_by_sev.get("warning") == 8
+
+    def test_prioritize_overflow_tolerance_6(self) -> None:
+        """Verify +6 overflow tolerance works, +7 doesn't."""
+        from bmad_assist.compiler.shared_utils import _prioritize_findings
+
+        # Budget = 0 (0 criticals, max_findings=0)
+        # Group of 6 -> fits within overflow_tolerance=6
+        group_6 = [
+            self._make_finding(f"G{i}", severity="error", domain="dom") for i in range(6)
+        ]
+        result, omitted, _ = _prioritize_findings(group_6, max_findings=0, overflow_tolerance=6)
+        assert len(result) == 6
+        assert omitted == 0
+
+        # Group of 7 -> exceeds overflow_tolerance=6
+        group_7 = [
+            self._make_finding(f"G{i}", severity="error", domain="dom") for i in range(7)
+        ]
+        result, omitted, _ = _prioritize_findings(group_7, max_findings=0, overflow_tolerance=6)
+        assert len(result) == 0
+        assert omitted == 7
+
+    def test_domain_avg_confidence_across_files(self) -> None:
+        """Same domain from 2 files -> confidences averaged across both."""
+        from bmad_assist.compiler.shared_utils import _prioritize_findings
+
+        findings = [
+            self._make_finding("F1", domain="auth", file_path="a.py", confidence=0.9,
+                               severity="error"),
+            self._make_finding("F2", domain="auth", file_path="b.py", confidence=0.5,
+                               severity="error"),
+            self._make_finding("F3", domain="storage", file_path="c.py", confidence=0.95,
+                               severity="error"),
+        ]
+        result, _, _ = _prioritize_findings(findings, max_findings=50)
+        # storage has higher avg confidence (0.95) than auth (0.7)
+        # Both are "error" severity, so storage should come first
+        assert result[0]["domain"] == "storage"
+        assert result[1]["domain"] == "auth"
+
+
+class TestRenderGroupedFindings:
+    """Tests for _render_grouped_findings() and dispatch logic."""
+
+    def _make_finding(
+        self,
+        finding_id: str = "F1",
+        severity: str = "critical",
+        domain: str = "security",
+        file_path: str = "src/auth/login.py",
+        title: str = "SQL injection",
+        confidence: float = 0.95,
+        line_number: int = 42,
+    ) -> dict:
+        return {
+            "id": finding_id,
+            "severity": severity,
+            "title": title,
+            "description": f"Description for {finding_id}",
+            "method": "#153",
+            "domain": domain,
+            "file_path": file_path,
+            "evidence": [
+                {"quote": "code here", "line_number": line_number, "confidence": confidence}
+            ],
+        }
+
+    def test_grouped_rendering_line_ranges(self) -> None:
+        """File header shows correct L{min}-L{max}."""
+        from bmad_assist.compiler.shared_utils import _render_grouped_findings
+
+        findings = [
+            self._make_finding("F1", line_number=42),
+            self._make_finding("F2", line_number=112),
+        ]
+        dv = {"verdict": "REJECT", "score": 8.5, "findings": findings,
+              "domains": [], "methods": []}
+        result = _render_grouped_findings(findings, 0, {}, dv)
+        assert "(L42-L112)" in result
+
+    def test_grouped_rendering_single_line(self) -> None:
+        """Single line -> (L42) not (L42-L42)."""
+        from bmad_assist.compiler.shared_utils import _render_grouped_findings
+
+        findings = [self._make_finding("F1", line_number=42)]
+        dv = {"verdict": "REJECT", "score": 8.5, "findings": findings,
+              "domains": [], "methods": []}
+        result = _render_grouped_findings(findings, 0, {}, dv)
+        assert "(L42)" in result
+        assert "(L42-L42)" not in result
+
+    def test_grouped_rendering_omitted_footer(self) -> None:
+        """Footer shows correct breakdown."""
+        from bmad_assist.compiler.shared_utils import _render_grouped_findings
+
+        findings = [self._make_finding("F1")]
+        omitted_by_sev = {"warning": 12, "info": 13}
+        dv = {"verdict": "REJECT", "score": 8.5, "findings": findings,
+              "domains": [], "methods": []}
+        result = _render_grouped_findings(findings, 25, omitted_by_sev, dv)
+        assert "25 lower-priority findings omitted" in result
+        assert "13 info" in result
+        assert "12 warning" in result
+
+    def test_grouped_rendering_severity_domain_file_hierarchy(self) -> None:
+        """Correct nesting: severity-domain header, file header, finding lines."""
+        from bmad_assist.compiler.shared_utils import _render_grouped_findings
+
+        findings = [
+            self._make_finding("F1", severity="critical", domain="security",
+                               file_path="src/auth.py", line_number=10),
+            self._make_finding("F2", severity="error", domain="error-handling",
+                               file_path="src/handler.py", line_number=22),
+        ]
+        dv = {"verdict": "REJECT", "score": 7.0, "findings": findings,
+              "domains": [], "methods": []}
+        result = _render_grouped_findings(findings, 0, {}, dv)
+        # Severity-domain headers
+        assert "### CRITICAL — security" in result
+        assert "### ERROR — error-handling" in result
+        # File headers
+        assert "**src/auth.py**" in result
+        assert "**src/handler.py**" in result
+        # Finding lines with confidence
+        assert "[0.95]" in result
+        # CRITICAL comes before ERROR
+        crit_pos = result.index("### CRITICAL")
+        err_pos = result.index("### ERROR")
+        assert crit_pos < err_pos
+
+    def test_dispatch_with_file_path(self) -> None:
+        """Findings with file_path -> grouped rendering."""
+        from bmad_assist.compiler.shared_utils import format_dv_findings_for_prompt
+
+        dv = {
+            "verdict": "REJECT",
+            "score": 8.5,
+            "findings": [self._make_finding("F1", file_path="src/app.py")],
+            "domains": [{"domain": "security", "confidence": 0.95}],
+            "methods": ["#153"],
+        }
+        result = format_dv_findings_for_prompt(dv)
+        # Grouped format uses "## Findings (N of M" header
+        assert "## Findings (1 of 1" in result
+        # Has severity-domain header style
+        assert "### CRITICAL — security" in result
+
+    def test_dispatch_without_file_path(self) -> None:
+        """Findings without file_path -> flat rendering (backward compat)."""
+        from bmad_assist.compiler.shared_utils import format_dv_findings_for_prompt
+
+        dv = {
+            "verdict": "REJECT",
+            "score": 8.5,
+            "findings_count": 1,
+            "critical_count": 1,
+            "error_count": 0,
+            "domains": [{"domain": "security", "confidence": 0.95}],
+            "methods": ["#153"],
+            "findings": [
+                {
+                    "id": "F1",
+                    "severity": "critical",
+                    "title": "SQL Injection Risk",
+                    "description": "User input not sanitized",
+                    "method": "#153",
+                    "domain": "security",
+                    "evidence": [{"quote": "query = ...", "line_number": 42}],
+                }
+            ],
+        }
+        result = format_dv_findings_for_prompt(dv)
+        # Flat format uses "## Findings" without count
+        assert "## Findings" in result
+        assert "## Findings (" not in result
+        # Has original-style headers
+        assert "### [CRITICAL] F1:" in result

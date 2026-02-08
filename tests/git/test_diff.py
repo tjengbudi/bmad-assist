@@ -16,6 +16,8 @@ from bmad_assist.git.diff import (
     DEFAULT_EXCLUDE_PATTERNS,
     DiffQualityError,
     DiffValidationResult,
+    _classify_file_priority,
+    _prioritize_diff_sections,
     capture_filtered_diff,
     extract_files_from_diff,
     get_merge_base,
@@ -97,10 +99,11 @@ class TestPathFiltering:
     """Tests for path filtering in diff (P0)."""
 
     def test_default_exclude_patterns_include_cache_files(self) -> None:
-        """Default exclude patterns include cache and metadata files."""
+        """Default exclude patterns include cache, metadata, and BMAD artifact files."""
         assert "*.cache" in DEFAULT_EXCLUDE_PATTERNS
         assert "*.meta.yaml" in DEFAULT_EXCLUDE_PATTERNS
-        assert ".bmad-assist/cache/*" in DEFAULT_EXCLUDE_PATTERNS
+        assert ".bmad-assist/*" in DEFAULT_EXCLUDE_PATTERNS
+        assert "_bmad-output/*" in DEFAULT_EXCLUDE_PATTERNS
         assert "node_modules/*" in DEFAULT_EXCLUDE_PATTERNS
         assert "__pycache__/*" in DEFAULT_EXCLUDE_PATTERNS
 
@@ -259,3 +262,110 @@ class TestValidatedDiff:
 
         assert validation.is_valid is False
         assert diff != ""  # Still returns the diff
+
+
+class TestClassifyFilePriority:
+    """Tests for _classify_file_priority()."""
+
+    def test_source_file_gets_priority_0(self) -> None:
+        """Source code files should get highest priority (0)."""
+        assert _classify_file_priority("src/lib/store.ts") == 0
+        assert _classify_file_priority("app/main.py") == 0
+        assert _classify_file_priority("lib/handler.go") == 0
+        assert _classify_file_priority("src/Component.svelte") == 0
+        assert _classify_file_priority("src/App.vue") == 0
+
+    def test_test_file_gets_priority_1(self) -> None:
+        """Test files should get medium priority (1)."""
+        assert _classify_file_priority("tests/test_main.py") == 1
+        assert _classify_file_priority("src/lib/store.test.ts") == 1
+        assert _classify_file_priority("tests/e2e/flow.spec.ts") == 1
+        assert _classify_file_priority("__tests__/app.js") == 1
+
+    def test_config_file_gets_priority_2(self) -> None:
+        """Config files should get low priority (2)."""
+        assert _classify_file_priority("package.json") == 2
+        assert _classify_file_priority("tsconfig.json") == 2
+        assert _classify_file_priority("config.yaml") == 2
+
+    def test_unknown_file_gets_priority_3(self) -> None:
+        """Unknown file types should get lowest priority (3)."""
+        assert _classify_file_priority("Dockerfile") == 3
+        assert _classify_file_priority("LICENSE") == 3
+
+
+class TestPrioritizeDiffSections:
+    """Tests for _prioritize_diff_sections()."""
+
+    def test_source_files_sorted_before_config(self) -> None:
+        """Source code diff sections should appear before config sections."""
+        patch_content = (
+            "diff --git a/config.yaml b/config.yaml\n"
+            "--- a/config.yaml\n"
+            "+++ b/config.yaml\n"
+            "+setting: value\n"
+            "diff --git a/src/main.py b/src/main.py\n"
+            "--- a/src/main.py\n"
+            "+++ b/src/main.py\n"
+            "+import os\n"
+        )
+
+        result = _prioritize_diff_sections(patch_content)
+
+        # src/main.py (priority 0) should appear before config.yaml (priority 2)
+        main_pos = result.find("src/main.py")
+        config_pos = result.find("config.yaml")
+        assert main_pos < config_pos
+
+    def test_source_before_test_before_config(self) -> None:
+        """Full priority ordering: source > test > config."""
+        patch_content = (
+            "diff --git a/setup.yaml b/setup.yaml\n"
+            "+config\n"
+            "diff --git a/tests/test_app.py b/tests/test_app.py\n"
+            "+test code\n"
+            "diff --git a/src/app.py b/src/app.py\n"
+            "+source code\n"
+        )
+
+        result = _prioritize_diff_sections(patch_content)
+
+        src_pos = result.find("src/app.py")
+        test_pos = result.find("tests/test_app.py")
+        cfg_pos = result.find("setup.yaml")
+        assert src_pos < test_pos < cfg_pos
+
+    def test_empty_input_returns_empty(self) -> None:
+        """Empty patch content should return empty."""
+        assert _prioritize_diff_sections("") == ""
+        assert _prioritize_diff_sections("   \n  ") == "   \n  "
+
+    def test_single_section_unchanged(self) -> None:
+        """A single diff section should be returned unchanged."""
+        patch = (
+            "diff --git a/src/main.py b/src/main.py\n"
+            "+import os\n"
+        )
+        assert _prioritize_diff_sections(patch) == patch
+
+
+class TestGarbagePatternsIncludeBmadPaths:
+    """Tests that garbage detection catches .bmad-assist and _bmad-output."""
+
+    def test_bmad_assist_state_is_garbage(self) -> None:
+        """Files in .bmad-assist/ should be detected as garbage."""
+        diff_content = " .bmad-assist/state.yaml | 6 +-\n 1 file changed\n"
+        result = validate_diff_quality(diff_content)
+        assert result.garbage_files == 1
+        assert result.source_files == 0
+
+    def test_bmad_output_benchmarks_are_garbage(self) -> None:
+        """Files in _bmad-output/ should be detected as garbage."""
+        diff_content = (
+            " _bmad-output/implementation-artifacts/benchmarks/eval.yaml | 130 +++\n"
+            " src/main.py | 10 +\n"
+            " 2 files changed\n"
+        )
+        result = validate_diff_quality(diff_content)
+        assert result.garbage_files == 1
+        assert result.source_files == 1

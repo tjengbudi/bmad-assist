@@ -44,23 +44,14 @@ class TestVariantMetrics:
             variant="control",
             count=15,
             date_range=(datetime(2025, 1, 1, tzinfo=UTC), datetime(2025, 1, 15, tzinfo=UTC)),
-            mean_agreement_score=0.85,
-            std_agreement_score=0.05,
             mean_findings_count=12.5,
             std_findings_count=3.2,
-            mean_actionable_ratio=0.75,
-            std_actionable_ratio=0.08,
-            mean_specificity=0.82,
-            std_specificity=0.06,
-            synthesizer_count=10,
             validator_count=5,
         )
 
         assert metrics.variant == "control"
         assert metrics.count == 15
-        assert metrics.mean_agreement_score == 0.85
-        assert metrics.std_agreement_score == 0.05
-        assert metrics.synthesizer_count == 10
+        assert metrics.mean_findings_count == 12.5
         assert metrics.validator_count == 5
 
     def test_create_with_none_metrics(self) -> None:
@@ -71,21 +62,14 @@ class TestVariantMetrics:
             variant="empty",
             count=0,
             date_range=None,
-            mean_agreement_score=None,
-            std_agreement_score=None,
             mean_findings_count=None,
             std_findings_count=None,
-            mean_actionable_ratio=None,
-            std_actionable_ratio=None,
-            mean_specificity=None,
-            std_specificity=None,
-            synthesizer_count=0,
             validator_count=0,
         )
 
         assert metrics.variant == "empty"
         assert metrics.count == 0
-        assert metrics.mean_agreement_score is None
+        assert metrics.mean_findings_count is None
 
     def test_frozen_dataclass(self) -> None:
         """Test that VariantMetrics is immutable."""
@@ -95,15 +79,8 @@ class TestVariantMetrics:
             variant="test",
             count=5,
             date_range=None,
-            mean_agreement_score=0.9,
-            std_agreement_score=0.1,
             mean_findings_count=10.0,
             std_findings_count=2.0,
-            mean_actionable_ratio=0.8,
-            std_actionable_ratio=0.05,
-            mean_specificity=0.85,
-            std_specificity=0.04,
-            synthesizer_count=3,
             validator_count=2,
         )
 
@@ -174,15 +151,8 @@ class TestComparisonResult:
             variant="v1",
             count=10,
             date_range=None,
-            mean_agreement_score=0.8,
-            std_agreement_score=0.1,
             mean_findings_count=5.0,
             std_findings_count=1.0,
-            mean_actionable_ratio=0.7,
-            std_actionable_ratio=0.1,
-            mean_specificity=0.75,
-            std_specificity=0.08,
-            synthesizer_count=8,
             validator_count=2,
         )
 
@@ -190,31 +160,24 @@ class TestComparisonResult:
             variant="v2",
             count=12,
             date_range=None,
-            mean_agreement_score=0.85,
-            std_agreement_score=0.08,
             mean_findings_count=6.0,
             std_findings_count=1.5,
-            mean_actionable_ratio=0.75,
-            std_actionable_ratio=0.08,
-            mean_specificity=0.80,
-            std_specificity=0.07,
-            synthesizer_count=10,
             validator_count=2,
         )
 
         metrics = [
             MetricComparison(
-                name="Agreement Score",
-                value_a=0.8,
-                std_a=0.1,
-                count_a=8,
-                value_b=0.85,
-                std_b=0.08,
-                count_b=10,
-                delta=-0.05,
+                name="Findings Count",
+                value_a=5.0,
+                std_a=1.0,
+                count_a=2,
+                value_b=6.0,
+                std_b=1.5,
+                count_b=2,
+                delta=-1.0,
                 p_value=0.15,
                 significant=False,
-                format_spec=".2f",
+                format_spec=".1f",
             ),
         ]
 
@@ -399,40 +362,8 @@ class TestAggregateVariantMetrics:
         assert metrics.variant == "empty"
         assert metrics.count == 0
         assert metrics.date_range is None
-        assert metrics.mean_agreement_score is None
-        assert metrics.synthesizer_count == 0
+        assert metrics.mean_findings_count is None
         assert metrics.validator_count == 0
-
-    def test_synthesizer_records_only(self) -> None:
-        """Test aggregation with synthesizer records only."""
-        from bmad_assist.benchmarking.reports import _aggregate_variant_metrics
-
-        records = [
-            _create_test_record(
-                "v1",
-                EvaluatorRole.SYNTHESIZER,
-                agreement_score=0.8,
-                actionable_ratio=0.7,
-                specificity_score=0.75,
-            ),
-            _create_test_record(
-                "v1",
-                EvaluatorRole.SYNTHESIZER,
-                agreement_score=0.9,
-                actionable_ratio=0.8,
-                specificity_score=0.85,
-            ),
-        ]
-
-        metrics = _aggregate_variant_metrics(records, "v1")
-
-        assert metrics.variant == "v1"
-        assert metrics.count == 2
-        assert metrics.synthesizer_count == 2
-        assert metrics.validator_count == 0
-        assert metrics.mean_agreement_score is not None
-        assert abs(metrics.mean_agreement_score - 0.85) < 0.001
-        assert metrics.mean_findings_count is None  # No validators
 
     def test_validator_records_only(self) -> None:
         """Test aggregation with validator records only."""
@@ -446,10 +377,8 @@ class TestAggregateVariantMetrics:
         metrics = _aggregate_variant_metrics(records, "v1")
 
         assert metrics.count == 2
-        assert metrics.synthesizer_count == 0
         assert metrics.validator_count == 2
         assert metrics.mean_findings_count == 12.0
-        assert metrics.mean_agreement_score is None  # No synthesizers
 
     def test_mixed_records(self) -> None:
         """Test aggregation with both synthesizer and validator records."""
@@ -463,26 +392,24 @@ class TestAggregateVariantMetrics:
         metrics = _aggregate_variant_metrics(records, "v1")
 
         assert metrics.count == 2
-        assert metrics.synthesizer_count == 1
         assert metrics.validator_count == 1
-        assert metrics.mean_agreement_score == 0.85
         assert metrics.mean_findings_count == 12.0
 
     def test_none_values_excluded(self) -> None:
         """Test that None values are excluded from calculations."""
         from bmad_assist.benchmarking.reports import _aggregate_variant_metrics
 
-        # Create records with missing consensus
+        # Create validator records with missing findings
         records = [
-            _create_test_record("v1", EvaluatorRole.SYNTHESIZER, agreement_score=0.8),
-            _create_test_record("v1", EvaluatorRole.SYNTHESIZER),  # No consensus
+            _create_test_record("v1", EvaluatorRole.VALIDATOR, findings_count=10, role_id="a"),
+            _create_test_record("v1", EvaluatorRole.VALIDATOR, role_id="b"),  # No findings
         ]
 
         metrics = _aggregate_variant_metrics(records, "v1")
 
-        # Should only use the one record with agreement_score
-        assert metrics.mean_agreement_score == 0.8
-        assert metrics.std_agreement_score is None  # Only one valid value
+        # Should only use the one record with findings_count
+        assert metrics.mean_findings_count == 10.0
+        assert metrics.std_findings_count is None  # Only one valid value
 
 
 # =============================================================================
@@ -599,15 +526,8 @@ class TestGenerateComparisonReport:
             variant="control",
             count=15,
             date_range=(datetime(2025, 1, 1, tzinfo=UTC), datetime(2025, 1, 15, tzinfo=UTC)),
-            mean_agreement_score=0.85,
-            std_agreement_score=0.05,
             mean_findings_count=12.5,
             std_findings_count=3.2,
-            mean_actionable_ratio=0.75,
-            std_actionable_ratio=0.08,
-            mean_specificity=0.82,
-            std_specificity=0.06,
-            synthesizer_count=10,
             validator_count=5,
         )
 
@@ -615,31 +535,24 @@ class TestGenerateComparisonReport:
             variant="experimental",
             count=12,
             date_range=(datetime(2025, 1, 5, tzinfo=UTC), datetime(2025, 1, 20, tzinfo=UTC)),
-            mean_agreement_score=0.78,
-            std_agreement_score=0.08,
             mean_findings_count=10.0,
             std_findings_count=2.5,
-            mean_actionable_ratio=0.80,
-            std_actionable_ratio=0.05,
-            mean_specificity=0.75,
-            std_specificity=0.07,
-            synthesizer_count=8,
             validator_count=4,
         )
 
         metrics = [
             MetricComparison(
-                name="Agreement Score",
-                value_a=0.85,
-                std_a=0.05,
-                count_a=10,
-                value_b=0.78,
-                std_b=0.08,
-                count_b=8,
-                delta=0.07,
+                name="Findings Count",
+                value_a=12.5,
+                std_a=3.2,
+                count_a=5,
+                value_b=10.0,
+                std_b=2.5,
+                count_b=4,
+                delta=2.5,
                 p_value=0.023,
                 significant=True,
-                format_spec=".2f",
+                format_spec=".1f",
             ),
         ]
 
@@ -678,15 +591,8 @@ class TestGenerateComparisonReport:
             variant="v1",
             count=10,
             date_range=None,
-            mean_agreement_score=0.85,
-            std_agreement_score=0.05,
             mean_findings_count=None,
             std_findings_count=None,
-            mean_actionable_ratio=None,
-            std_actionable_ratio=None,
-            mean_specificity=None,
-            std_specificity=None,
-            synthesizer_count=10,
             validator_count=0,
         )
 
@@ -694,31 +600,24 @@ class TestGenerateComparisonReport:
             variant="v2",
             count=8,
             date_range=None,
-            mean_agreement_score=0.75,
-            std_agreement_score=0.10,
             mean_findings_count=None,
             std_findings_count=None,
-            mean_actionable_ratio=None,
-            std_actionable_ratio=None,
-            mean_specificity=None,
-            std_specificity=None,
-            synthesizer_count=8,
             validator_count=0,
         )
 
         metrics = [
             MetricComparison(
-                name="Agreement Score",
-                value_a=0.85,
-                std_a=0.05,
-                count_a=10,
-                value_b=0.75,
-                std_b=0.10,
-                count_b=8,
-                delta=0.10,
-                p_value=0.04,
-                significant=True,
-                format_spec=".2f",
+                name="Findings Count",
+                value_a=None,
+                std_a=None,
+                count_a=0,
+                value_b=None,
+                std_b=None,
+                count_b=0,
+                delta=None,
+                p_value=None,
+                significant=None,
+                format_spec=".1f",
             ),
         ]
 
@@ -751,47 +650,33 @@ class TestGenerateComparisonReport:
             variant="v1",
             count=10,
             date_range=None,
-            mean_agreement_score=0.9,
-            std_agreement_score=0.05,
-            mean_findings_count=None,
-            std_findings_count=None,
-            mean_actionable_ratio=None,
-            std_actionable_ratio=None,
-            mean_specificity=None,
-            std_specificity=None,
-            synthesizer_count=10,
-            validator_count=0,
+            mean_findings_count=15.0,
+            std_findings_count=2.0,
+            validator_count=10,
         )
 
         variant_b = VariantMetrics(
             variant="v2",
             count=10,
             date_range=None,
-            mean_agreement_score=0.7,
-            std_agreement_score=0.10,
-            mean_findings_count=None,
-            std_findings_count=None,
-            mean_actionable_ratio=None,
-            std_actionable_ratio=None,
-            mean_specificity=None,
-            std_specificity=None,
-            synthesizer_count=10,
-            validator_count=0,
+            mean_findings_count=10.0,
+            std_findings_count=1.5,
+            validator_count=10,
         )
 
         metrics = [
             MetricComparison(
-                name="Agreement Score",
-                value_a=0.9,
-                std_a=0.05,
+                name="Findings Count",
+                value_a=15.0,
+                std_a=2.0,
                 count_a=10,
-                value_b=0.7,
-                std_b=0.10,
+                value_b=10.0,
+                std_b=1.5,
                 count_b=10,
-                delta=0.2,
+                delta=5.0,
                 p_value=0.001,
                 significant=True,
-                format_spec=".2f",
+                format_spec=".1f",
             ),
         ]
 
@@ -823,21 +708,14 @@ class TestGenerateComparisonReport:
             variant="empty",
             count=0,
             date_range=None,
-            mean_agreement_score=None,
-            std_agreement_score=None,
             mean_findings_count=None,
             std_findings_count=None,
-            mean_actionable_ratio=None,
-            std_actionable_ratio=None,
-            mean_specificity=None,
-            std_specificity=None,
-            synthesizer_count=0,
             validator_count=0,
         )
 
         metrics = [
             MetricComparison(
-                name="Agreement Score",
+                name="Findings Count",
                 value_a=None,
                 std_a=None,
                 count_a=0,
@@ -847,7 +725,7 @@ class TestGenerateComparisonReport:
                 delta=None,
                 p_value=None,
                 significant=None,
-                format_spec=".2f",
+                format_spec=".1f",
             ),
         ]
 
@@ -878,15 +756,8 @@ class TestGenerateComparisonReport:
             variant="v1",
             count=5,
             date_range=None,
-            mean_agreement_score=0.8,
-            std_agreement_score=0.05,
             mean_findings_count=None,
             std_findings_count=None,
-            mean_actionable_ratio=None,
-            std_actionable_ratio=None,
-            mean_specificity=None,
-            std_specificity=None,
-            synthesizer_count=5,
             validator_count=0,
         )
 
@@ -1058,15 +929,8 @@ class TestCLIBenchmarkCompare:
                     variant="v1",
                     count=5,
                     date_range=None,
-                    mean_agreement_score=0.8,
-                    std_agreement_score=0.05,
                     mean_findings_count=None,
                     std_findings_count=None,
-                    mean_actionable_ratio=None,
-                    std_actionable_ratio=None,
-                    mean_specificity=None,
-                    std_specificity=None,
-                    synthesizer_count=5,
                     validator_count=0,
                 )
                 mock_result = ComparisonResult(
@@ -1122,15 +986,8 @@ class TestCLIBenchmarkCompare:
                     variant="v1",
                     count=5,
                     date_range=None,
-                    mean_agreement_score=0.8,
-                    std_agreement_score=0.05,
                     mean_findings_count=None,
                     std_findings_count=None,
-                    mean_actionable_ratio=None,
-                    std_actionable_ratio=None,
-                    mean_specificity=None,
-                    std_specificity=None,
-                    synthesizer_count=5,
                     validator_count=0,
                 )
                 mock_result = ComparisonResult(

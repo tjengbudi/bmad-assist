@@ -26,9 +26,12 @@ Example:
 
 import asyncio
 import logging
+import shutil
 import threading
 import time
+from collections.abc import AsyncIterator
 from pathlib import Path
+from typing import Any
 
 from claude_agent_sdk import (
     AssistantMessage,
@@ -167,6 +170,26 @@ class ClaudeSDKProvider(BaseProvider):
             model=model,
         )
 
+    @staticmethod
+    async def _prompt_stream(prompt: str) -> AsyncIterator[dict[str, Any]]:
+        """Wrap prompt string as async stream-json iterator.
+
+        Uses SDK streaming input mode (--input-format stream-json) to send
+        prompt via stdin instead of CLI args. This avoids E2BIG (Argument
+        list too long) errors with large compiled workflow prompts.
+
+        Args:
+            prompt: The prompt text to send.
+
+        Yields:
+            Single user message dict in SDK stream-json format.
+
+        """
+        yield {
+            "type": "user",
+            "message": {"role": "user", "content": prompt},
+        }
+
     async def _invoke_async(
         self,
         prompt: str,
@@ -177,8 +200,9 @@ class ClaudeSDKProvider(BaseProvider):
     ) -> str:
         """Execute SDK query asynchronously.
 
-        Internal async helper that performs the actual SDK call. This method
-        iterates through SDK messages and extracts text content from
+        Internal async helper that performs the actual SDK call. Uses streaming
+        input mode to pass prompt via stdin (avoids CLI argument length limits).
+        Iterates through SDK messages and extracts text content from
         AssistantMessage blocks.
 
         Args:
@@ -198,12 +222,20 @@ class ClaudeSDKProvider(BaseProvider):
             ProviderError: If no response is received (empty iteration).
 
         """
+        # Prefer system-installed CLI; fall back to SDK-bundled binary
+        system_cli = shutil.which("claude")
+        if system_cli:
+            logger.debug("Using system Claude CLI: %s", system_cli)
+        else:
+            logger.warning("System Claude CLI not found, falling back to SDK-bundled binary")
+
         # Build SDK options with explicit values
         options = ClaudeAgentOptions(
             model=model,
             permission_mode="acceptEdits",  # Explicit automation mode
             settings=str(settings) if settings is not None else None,
             cwd=cwd,
+            cli_path=system_cli,  # Skip bundled CLI, use system install
             # Tool restrictions: use 'tools' parameter to set explicit list
             # IMPORTANT: empty list [] means "no tools", None means "all tools"
             # Use explicit check for None to distinguish [] from None
@@ -213,7 +245,9 @@ class ClaudeSDKProvider(BaseProvider):
         response_parts: list[str] = []
 
         try:
-            async for message in query(prompt=prompt, options=options):
+            # Use streaming input to avoid E2BIG with large prompts
+            prompt_iter = self._prompt_stream(prompt)
+            async for message in query(prompt=prompt_iter, options=options):
                 # Extract text content from AssistantMessage only
                 if isinstance(message, AssistantMessage):
                     for block in message.content:
@@ -232,6 +266,78 @@ class ClaudeSDKProvider(BaseProvider):
 
         return "".join(response_parts)
 
+    async def _invoke_with_cancel(
+        self,
+        prompt: str,
+        model: str,
+        settings: Path | None,
+        cwd: Path | None,
+        allowed_tools: list[str] | None,
+        cancel_token: threading.Event,
+        timeout: int,
+    ) -> str:
+        """Execute SDK query with cancel_token support.
+
+        Runs SDK query and cancel monitor as concurrent tasks. When
+        cancel_token is set, the SDK task is cancelled — this propagates
+        CancelledError into the async generator, killing the subprocess.
+
+        Args:
+            prompt: The prompt text to send to Claude.
+            model: Model identifier to use.
+            settings: Optional validated settings file path.
+            cwd: Working directory for the CLI process.
+            allowed_tools: Optional list of allowed tools.
+            cancel_token: Threading event checked for cancellation.
+            timeout: Timeout in seconds.
+
+        Returns:
+            Response text from SDK.
+
+        Raises:
+            asyncio.CancelledError: If cancel_token was set.
+            TimeoutError: If timeout exceeded.
+            CLINotFoundError: If Claude Code CLI is not found.
+            ProcessError: If Claude Code process fails.
+
+        """
+        sdk_task = asyncio.create_task(
+            self._invoke_async(prompt, model, settings, cwd, allowed_tools)
+        )
+
+        async def _wait_for_cancel() -> None:
+            while not cancel_token.is_set():
+                await asyncio.sleep(0.5)
+
+        cancel_task = asyncio.create_task(_wait_for_cancel())
+
+        try:
+            done, pending = await asyncio.wait(
+                {sdk_task, cancel_task},
+                timeout=timeout,
+                return_when=asyncio.FIRST_COMPLETED,
+            )
+        except BaseException:
+            sdk_task.cancel()
+            cancel_task.cancel()
+            raise
+
+        # Clean up pending tasks
+        for task in pending:
+            task.cancel()
+
+        # Timeout — neither finished
+        if not done:
+            raise TimeoutError
+
+        # Cancel was triggered
+        if cancel_task in done and sdk_task not in done:
+            logger.info("Cancel token set, cancelling SDK task")
+            raise asyncio.CancelledError
+
+        # SDK completed (cancel_task still pending — already cancelled above)
+        return sdk_task.result()
+
     def invoke(
         self,
         prompt: str,
@@ -247,6 +353,7 @@ class ClaudeSDKProvider(BaseProvider):
         display_model: str | None = None,
         thinking: bool | None = None,
         cancel_token: threading.Event | None = None,
+        reasoning_effort: str | None = None,
     ) -> ProviderResult:
         """Execute Claude Code SDK with the given prompt.
 
@@ -300,8 +407,10 @@ class ClaudeSDKProvider(BaseProvider):
 
         """
         # Ignored parameters (SDK doesn't support these)
-        _ = disable_tools, no_cache, color_index
+        _ = no_cache, color_index
         # Note: allowed_tools IS supported - passed to _invoke_async
+        if disable_tools and allowed_tools is None:
+            allowed_tools = []
 
         # Validate timeout parameter
         if timeout is not None and timeout <= 0:
@@ -321,10 +430,15 @@ class ClaudeSDKProvider(BaseProvider):
         # Validate and resolve settings file
         validated_settings = self._resolve_settings(settings_file, effective_model)
 
+        # Resolve display model (model_name from config, e.g. "glm-4.7")
+        shown_model = display_model or effective_model
+
         tools_info = allowed_tools if allowed_tools else "all"
         logger.debug(
-            "Invoking Claude SDK: model=%s, timeout=%ds, prompt_len=%d, settings=%s, tools=%s",
+            "Invoking Claude SDK: model=%s, display_model=%s, timeout=%ds, "
+            "prompt_len=%d, settings=%s, tools=%s",
             effective_model,
+            shown_model,
             effective_timeout,
             len(prompt),
             validated_settings,
@@ -341,13 +455,32 @@ class ClaudeSDKProvider(BaseProvider):
             # shutting down the default executor when called via asyncio.to_thread()
             from bmad_assist.core.async_utils import run_async_in_thread
 
-            response_text = run_async_in_thread(
-                asyncio.wait_for(
-                    self._invoke_async(
-                        prompt, effective_model, validated_settings, cwd, allowed_tools
-                    ),
-                    timeout=effective_timeout,
+            if cancel_token is not None:
+                response_text = run_async_in_thread(
+                    self._invoke_with_cancel(
+                        prompt, effective_model, validated_settings, cwd,
+                        allowed_tools, cancel_token, effective_timeout,
+                    )
                 )
+            else:
+                response_text = run_async_in_thread(
+                    asyncio.wait_for(
+                        self._invoke_async(
+                            prompt, effective_model, validated_settings, cwd, allowed_tools
+                        ),
+                        timeout=effective_timeout,
+                    )
+                )
+        except asyncio.CancelledError:
+            duration_ms = int((time.perf_counter() - start_time) * 1000)
+            logger.info("SDK cancelled after %dms", duration_ms)
+            return ProviderResult(
+                stdout="",
+                stderr="",
+                exit_code=-15,
+                duration_ms=duration_ms,
+                model=shown_model,
+                command=command,
             )
         except TimeoutError as e:
             duration_ms = int((time.perf_counter() - start_time) * 1000)
@@ -395,7 +528,7 @@ class ClaudeSDKProvider(BaseProvider):
             stderr="",  # SDK doesn't separate stderr
             exit_code=0,
             duration_ms=duration_ms,
-            model=effective_model,
+            model=shown_model,
             command=command,
         )
 

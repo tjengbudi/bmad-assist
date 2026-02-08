@@ -109,9 +109,14 @@ class TestRichOutput:
 class TestLoggingSetup:
     """Tests for logging configuration (AC10, AC11)."""
 
-    def test_setup_logging_verbose_sets_debug(self) -> None:
-        """AC10: --verbose sets DEBUG level."""
+    def test_setup_logging_verbose_sets_info(self) -> None:
+        """--verbose sets INFO level (not DEBUG — use --debug for DEBUG)."""
         _setup_logging(verbose=True, quiet=False)
+        assert logging.getLogger().level == logging.INFO
+
+    def test_setup_logging_debug_sets_debug(self) -> None:
+        """--debug sets DEBUG level."""
+        _setup_logging(verbose=False, quiet=False, debug=True)
         assert logging.getLogger().level == logging.DEBUG
 
     def test_setup_logging_quiet_sets_error(self) -> None:
@@ -124,10 +129,15 @@ class TestLoggingSetup:
         _setup_logging(verbose=False, quiet=False)
         assert logging.getLogger().level == logging.WARNING
 
-    def test_setup_logging_verbose_takes_precedence(self) -> None:
-        """AC10/AC11: --verbose takes precedence over --quiet."""
-        _setup_logging(verbose=True, quiet=True)
+    def test_setup_logging_debug_takes_precedence_over_verbose(self) -> None:
+        """--debug takes precedence over --verbose."""
+        _setup_logging(verbose=True, quiet=False, debug=True)
         assert logging.getLogger().level == logging.DEBUG
+
+    def test_setup_logging_verbose_takes_precedence_over_quiet(self) -> None:
+        """--verbose takes precedence over --quiet."""
+        _setup_logging(verbose=True, quiet=True)
+        assert logging.getLogger().level == logging.INFO
 
 
 # =============================================================================

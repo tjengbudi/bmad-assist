@@ -378,12 +378,12 @@ class CreateStoryCompiler:
 
         # 3. Previous stories via ContextBuilder
         builder = ContextBuilder(context)
-        builder = builder.add_previous_stories(count=3)
+        builder = builder.add_previous_stories(count=1)
         prev_stories_files = builder.build()
         files.update(prev_stories_files)
 
         # Get previous stories for source file collection using shared utility
-        prev_stories = find_previous_stories(context, resolved)
+        prev_stories = find_previous_stories(context, resolved, max_stories=1)
 
         # Collect file paths from all previous stories' File Lists
         file_list_paths: list[str] = []

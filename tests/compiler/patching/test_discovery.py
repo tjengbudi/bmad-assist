@@ -8,6 +8,7 @@ import pytest
 import yaml
 
 from bmad_assist.compiler.patching.discovery import (
+    compute_defaults_hash,
     determine_patch_source_level,
     discover_patch,
     load_defaults,
@@ -349,7 +350,13 @@ class TestLoadDefaults:
         patch_file = tmp_path / "test.patch.yaml"
         patch_file.touch()
 
-        with patch("pathlib.Path.home", return_value=tmp_path / "nonexistent"):
+        with (
+            patch("pathlib.Path.home", return_value=tmp_path / "nonexistent"),
+            patch(
+                "bmad_assist.compiler.patching.discovery._PACKAGE_DEFAULTS_DIR",
+                tmp_path / "nonexistent_pkg",
+            ),
+        ):
             rules = load_defaults(patch_file)
 
         assert rules == []
@@ -441,7 +448,13 @@ class TestLoadPatchWithDefaults:
         patch_file = tmp_path / "test.patch.yaml"
         patch_file.write_text(yaml.dump(minimal_patch_yaml))
 
-        with patch("pathlib.Path.home", return_value=tmp_path / "nonexistent"):
+        with (
+            patch("pathlib.Path.home", return_value=tmp_path / "nonexistent"),
+            patch(
+                "bmad_assist.compiler.patching.discovery._PACKAGE_DEFAULTS_DIR",
+                tmp_path / "nonexistent_pkg",
+            ),
+        ):
             result = load_patch(patch_file)
 
         assert result.post_process is not None
@@ -455,7 +468,13 @@ class TestLoadPatchWithDefaults:
         patch_file = tmp_path / "test.patch.yaml"
         patch_file.write_text(yaml.dump(minimal_patch_yaml))
 
-        with patch("pathlib.Path.home", return_value=tmp_path / "nonexistent"):
+        with (
+            patch("pathlib.Path.home", return_value=tmp_path / "nonexistent"),
+            patch(
+                "bmad_assist.compiler.patching.discovery._PACKAGE_DEFAULTS_DIR",
+                tmp_path / "nonexistent_pkg",
+            ),
+        ):
             result = load_patch(patch_file)
 
         assert result.post_process is None
@@ -563,3 +582,145 @@ class TestDeterminePatchSourceLevel:
         # Custom path inside project but not in .bmad-assist/patches
         # Should default to project
         assert result == project
+
+
+class TestComputeDefaultsHash:
+    """Tests for compute_defaults_hash function."""
+
+    def test_compute_hash_with_defaults_yaml(self, tmp_path: Path) -> None:
+        """Returns hash when defaults.yaml exists."""
+        defaults = tmp_path / "defaults.yaml"
+        defaults.write_text("post_process:\n  - pattern: test\n")
+        patch_file = tmp_path / "test.patch.yaml"
+        patch_file.touch()
+
+        result = compute_defaults_hash(patch_file)
+
+        assert result is not None
+        assert len(result) == 64  # SHA-256 hex digest
+
+    def test_compute_hash_with_tea_defaults(self, tmp_path: Path) -> None:
+        """Returns combined hash for TEA workflow (defaults + defaults-testarch)."""
+        defaults = tmp_path / "defaults.yaml"
+        defaults.write_text("post_process: []\n")
+        tea_defaults = tmp_path / "defaults-testarch.yaml"
+        tea_defaults.write_text("post_process: []\n")
+        patch_file = tmp_path / "testarch-ci.patch.yaml"
+        patch_file.touch()
+
+        result = compute_defaults_hash(patch_file, "testarch-ci")
+
+        assert result is not None
+
+        # Should be different from non-TEA hash (which only uses defaults.yaml)
+        non_tea = compute_defaults_hash(patch_file, "create-story")
+        assert result != non_tea
+
+    def test_compute_hash_tea_missing_testarch(self, tmp_path: Path) -> None:
+        """TEA workflow with defaults.yaml but no defaults-testarch → hashes only defaults."""
+        defaults = tmp_path / "defaults.yaml"
+        defaults.write_text("post_process: []\n")
+        patch_file = tmp_path / "testarch-ci.patch.yaml"
+        patch_file.touch()
+
+        with (
+            patch("pathlib.Path.home", return_value=tmp_path / "nonexistent"),
+            patch(
+                "bmad_assist.compiler.patching.discovery._PACKAGE_DEFAULTS_DIR",
+                tmp_path / "nonexistent_pkg",
+            ),
+        ):
+            result = compute_defaults_hash(patch_file, "testarch-ci")
+
+        assert result is not None
+        # Same as non-TEA since no testarch defaults found
+        with (
+            patch("pathlib.Path.home", return_value=tmp_path / "nonexistent"),
+            patch(
+                "bmad_assist.compiler.patching.discovery._PACKAGE_DEFAULTS_DIR",
+                tmp_path / "nonexistent_pkg",
+            ),
+        ):
+            non_tea = compute_defaults_hash(patch_file, "create-story")
+        assert result == non_tea
+
+    def test_compute_hash_no_defaults(self, tmp_path: Path) -> None:
+        """Returns None when no defaults files exist."""
+        patch_file = tmp_path / "test.patch.yaml"
+        patch_file.touch()
+
+        with (
+            patch("pathlib.Path.home", return_value=tmp_path / "nonexistent"),
+            patch(
+                "bmad_assist.compiler.patching.discovery._PACKAGE_DEFAULTS_DIR",
+                tmp_path / "nonexistent_pkg",
+            ),
+        ):
+            result = compute_defaults_hash(patch_file)
+
+        assert result is None
+
+    def test_compute_hash_deterministic(self, tmp_path: Path) -> None:
+        """Same files → same hash across calls."""
+        defaults = tmp_path / "defaults.yaml"
+        defaults.write_text("post_process: []\n")
+        patch_file = tmp_path / "test.patch.yaml"
+        patch_file.touch()
+
+        h1 = compute_defaults_hash(patch_file)
+        h2 = compute_defaults_hash(patch_file)
+        assert h1 == h2
+
+    def test_compute_hash_uses_raw_bytes(self, tmp_path: Path) -> None:
+        """Verifies hashing raw file bytes - different whitespace means different hash."""
+        defaults1 = tmp_path / "dir1"
+        defaults1.mkdir()
+        (defaults1 / "defaults.yaml").write_text("post_process: []\n")
+        patch_file1 = defaults1 / "test.patch.yaml"
+        patch_file1.touch()
+
+        defaults2 = tmp_path / "dir2"
+        defaults2.mkdir()
+        (defaults2 / "defaults.yaml").write_text("post_process:  []\n")  # extra space
+        patch_file2 = defaults2 / "test.patch.yaml"
+        patch_file2.touch()
+
+        h1 = compute_defaults_hash(patch_file1)
+        h2 = compute_defaults_hash(patch_file2)
+        assert h1 != h2  # Raw bytes differ
+
+
+class TestLoadDefaultsPackageFallback:
+    """Tests for _load_defaults_file package fallback."""
+
+    def test_load_defaults_testarch_package_fallback(self, tmp_path: Path) -> None:
+        """Defaults-testarch.yaml is found via package fallback for TEA workflows."""
+        # Create a patch dir without any defaults
+        patch_file = tmp_path / "patches" / "testarch-ci.patch.yaml"
+        patch_file.parent.mkdir(parents=True)
+        patch_file.touch()
+
+        # Set up package fallback dir with testarch defaults
+        pkg_dir = tmp_path / "package_defaults"
+        pkg_dir.mkdir()
+        (pkg_dir / "defaults.yaml").write_text(
+            "post_process:\n  - pattern: base\n    replacement: base_r\n"
+        )
+        (pkg_dir / "defaults-testarch.yaml").write_text(
+            "post_process:\n  - pattern: tea\n    replacement: tea_r\n"
+        )
+
+        with (
+            patch("pathlib.Path.home", return_value=tmp_path / "nonexistent"),
+            patch(
+                "bmad_assist.compiler.patching.discovery._PACKAGE_DEFAULTS_DIR",
+                pkg_dir,
+            ),
+        ):
+            rules = load_defaults(patch_file, "testarch-ci")
+
+        # Should find both: base + TEA rules
+        assert len(rules) == 2
+        patterns = [r.pattern for r in rules]
+        assert "base" in patterns
+        assert "tea" in patterns

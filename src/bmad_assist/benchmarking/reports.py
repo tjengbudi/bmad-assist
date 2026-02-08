@@ -67,30 +67,18 @@ UNDER_REPORT_THRESHOLD = 0.5  # severity % < 0.5x avg = under-reporting
 class VariantMetrics:
     """Aggregated metrics for a single workflow variant.
 
-    Tracks both synthesizer and validator metrics separately based on
-    record.evaluator.role to ensure correct aggregation.
+    Tracks validator metrics based on record.evaluator.role
+    to ensure correct aggregation.
     """
 
     variant: str
     count: int
     date_range: tuple[datetime, datetime] | None
 
-    # Agreement metrics (from synthesizer records)
-    mean_agreement_score: float | None
-    std_agreement_score: float | None
-
     # Findings metrics (from validator records)
     mean_findings_count: float | None
     std_findings_count: float | None
 
-    # Quality metrics (from synthesizer records)
-    mean_actionable_ratio: float | None
-    std_actionable_ratio: float | None
-    mean_specificity: float | None
-    std_specificity: float | None
-
-    # Per-role sample counts for statistical validity
-    synthesizer_count: int
     validator_count: int
 
 
@@ -370,7 +358,6 @@ def _aggregate_variant_metrics(
     """Aggregate metrics for a single variant.
 
     Separates records by evaluator role before aggregation:
-    - SYNTHESIZER records: agreement_score, actionable_ratio, specificity_score
     - VALIDATOR records: findings_count
 
     Args:
@@ -381,7 +368,6 @@ def _aggregate_variant_metrics(
         VariantMetrics with aggregated statistics.
 
     """
-    synthesizer_records = [r for r in records if r.evaluator.role == EvaluatorRole.SYNTHESIZER]
     validator_records = [r for r in records if r.evaluator.role == EvaluatorRole.VALIDATOR]
 
     # Calculate date range
@@ -391,43 +377,18 @@ def _aggregate_variant_metrics(
     else:
         date_range = None
 
-    # Agreement score (synthesizer only)
-    agreement_values = [
-        r.consensus.agreement_score for r in synthesizer_records if r.consensus is not None
-    ]
-    mean_agreement, std_agreement = _calculate_mean_std(agreement_values)
-
     # Findings count (validator only)
     findings_values = [
         float(r.findings.total_count) for r in validator_records if r.findings is not None
     ]
     mean_findings, std_findings = _calculate_mean_std(findings_values)
 
-    # Actionable ratio (synthesizer only)
-    actionable_values = [
-        r.quality.actionable_ratio for r in synthesizer_records if r.quality is not None
-    ]
-    mean_actionable, std_actionable = _calculate_mean_std(actionable_values)
-
-    # Specificity score (synthesizer only)
-    specificity_values = [
-        r.quality.specificity_score for r in synthesizer_records if r.quality is not None
-    ]
-    mean_specificity, std_specificity = _calculate_mean_std(specificity_values)
-
     return VariantMetrics(
         variant=variant,
         count=len(records),
         date_range=date_range,
-        mean_agreement_score=mean_agreement,
-        std_agreement_score=std_agreement,
         mean_findings_count=mean_findings,
         std_findings_count=std_findings,
-        mean_actionable_ratio=mean_actionable,
-        std_actionable_ratio=std_actionable,
-        mean_specificity=mean_specificity,
-        std_specificity=std_specificity,
-        synthesizer_count=len(synthesizer_records),
         validator_count=len(validator_records),
     )
 
@@ -1304,39 +1265,6 @@ def compare_workflow_variants(
     # Build metric comparisons with significance tests
     metric_comparisons: list[MetricComparison] = []
 
-    # Agreement Score (synthesizer records)
-    synth_a = [r for r in records_a if r.evaluator.role == EvaluatorRole.SYNTHESIZER]
-    synth_b = [r for r in records_b if r.evaluator.role == EvaluatorRole.SYNTHESIZER]
-
-    agreement_a = [r.consensus.agreement_score for r in synth_a if r.consensus is not None]
-    agreement_b = [r.consensus.agreement_score for r in synth_b if r.consensus is not None]
-
-    if scipy_available:
-        p_val, sig = _calculate_significance(agreement_a, agreement_b)
-    else:
-        p_val, sig = None, None
-    delta = (
-        metrics_a.mean_agreement_score - metrics_b.mean_agreement_score
-        if metrics_a.mean_agreement_score is not None and metrics_b.mean_agreement_score is not None
-        else None
-    )
-
-    metric_comparisons.append(
-        MetricComparison(
-            name="Agreement Score",
-            value_a=metrics_a.mean_agreement_score,
-            std_a=metrics_a.std_agreement_score,
-            count_a=len(agreement_a),
-            value_b=metrics_b.mean_agreement_score,
-            std_b=metrics_b.std_agreement_score,
-            count_b=len(agreement_b),
-            delta=delta,
-            p_value=p_val,
-            significant=sig,
-            format_spec=".2f",
-        )
-    )
-
     # Findings Count (validator records)
     val_a = [r for r in records_a if r.evaluator.role == EvaluatorRole.VALIDATOR]
     val_b = [r for r in records_b if r.evaluator.role == EvaluatorRole.VALIDATOR]
@@ -1367,67 +1295,6 @@ def compare_workflow_variants(
             p_value=p_val,
             significant=sig,
             format_spec=".1f",
-        )
-    )
-
-    # Actionable Ratio (synthesizer records)
-    actionable_a = [r.quality.actionable_ratio for r in synth_a if r.quality is not None]
-    actionable_b = [r.quality.actionable_ratio for r in synth_b if r.quality is not None]
-
-    if scipy_available:
-        p_val, sig = _calculate_significance(actionable_a, actionable_b)
-    else:
-        p_val, sig = None, None
-    delta = (
-        metrics_a.mean_actionable_ratio - metrics_b.mean_actionable_ratio
-        if metrics_a.mean_actionable_ratio is not None
-        and metrics_b.mean_actionable_ratio is not None
-        else None
-    )
-
-    metric_comparisons.append(
-        MetricComparison(
-            name="Actionable Ratio",
-            value_a=metrics_a.mean_actionable_ratio,
-            std_a=metrics_a.std_actionable_ratio,
-            count_a=len(actionable_a),
-            value_b=metrics_b.mean_actionable_ratio,
-            std_b=metrics_b.std_actionable_ratio,
-            count_b=len(actionable_b),
-            delta=delta,
-            p_value=p_val,
-            significant=sig,
-            format_spec=".2%",
-        )
-    )
-
-    # Specificity Score (synthesizer records)
-    specificity_a = [r.quality.specificity_score for r in synth_a if r.quality is not None]
-    specificity_b = [r.quality.specificity_score for r in synth_b if r.quality is not None]
-
-    if scipy_available:
-        p_val, sig = _calculate_significance(specificity_a, specificity_b)
-    else:
-        p_val, sig = None, None
-    delta = (
-        metrics_a.mean_specificity - metrics_b.mean_specificity
-        if metrics_a.mean_specificity is not None and metrics_b.mean_specificity is not None
-        else None
-    )
-
-    metric_comparisons.append(
-        MetricComparison(
-            name="Specificity Score",
-            value_a=metrics_a.mean_specificity,
-            std_a=metrics_a.std_specificity,
-            count_a=len(specificity_a),
-            value_b=metrics_b.mean_specificity,
-            std_b=metrics_b.std_specificity,
-            count_b=len(specificity_b),
-            delta=delta,
-            p_value=p_val,
-            significant=sig,
-            format_spec=".2f",
         )
     )
 

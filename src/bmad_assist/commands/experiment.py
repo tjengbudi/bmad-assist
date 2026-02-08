@@ -883,9 +883,12 @@ def experiment_templates(
                 for name in config_names:
                     try:
                         cfg = config_registry.get(name)
-                        master_model = (
-                            f"{cfg.providers.master.provider}/{cfg.providers.master.model}"
-                        )
+                        if cfg.providers is not None:
+                            master_model = (
+                                f"{cfg.providers.master.provider}/{cfg.providers.master.model}"
+                            )
+                        else:
+                            master_model = "(full config)"
                         table.add_row(cfg.name, cfg.description or "-", master_model)
                     except Exception as e:
                         table.add_row(name, f"[red]Error: {e}[/red]", "-")
@@ -980,3 +983,138 @@ def experiment_templates(
         except Exception as e:
             console.print(f"[dim]  Error loading fixtures: {e}[/dim]")
         console.print()
+
+
+@experiment_app.command("ab")
+def experiment_ab(
+    test_file: str = typer.Argument(
+        ...,
+        help="Path to A/B test definition YAML file",
+    ),
+    project: str = typer.Option(
+        ".",
+        "--project",
+        "-p",
+        help="Path to project directory",
+    ),
+    verbose: bool = typer.Option(
+        False,
+        "--verbose",
+        "-v",
+        help="Enable verbose output",
+    ),
+    dry_run: bool = typer.Option(
+        False,
+        "--dry-run",
+        "-n",
+        help="Validate configuration without execution",
+    ),
+) -> None:
+    """Run an A/B workflow test from a YAML definition file.
+
+    Creates git worktrees for each variant, runs the specified phases
+    through both, and generates a comparison report.
+
+    Examples:
+        bmad-assist experiment ab experiments/ab-tests/prompt-v2-test.yaml
+        bmad-assist experiment ab my-test.yaml --dry-run
+
+    """
+    from bmad_assist.experiments.ab import ABTestRunner, load_ab_test_config
+
+    _setup_logging(verbose=verbose, quiet=False)
+    project_path = _validate_project_path(project)
+    experiments_dir = _get_experiments_dir(project_path)
+
+    test_path = Path(test_file)
+    if not test_path.is_absolute():
+        test_path = project_path / test_path
+
+    try:
+        config = load_ab_test_config(test_path)
+    except ConfigError as e:
+        _error(str(e))
+        raise typer.Exit(code=EXIT_CONFIG_ERROR) from None
+
+    console.print(f"[bold]A/B Test: {config.name}[/bold]")
+    console.print(f"  Fixture: {config.fixture}")
+    console.print(f"  Stories: {', '.join(s.id for s in config.stories)}")
+    for s in config.stories:
+        console.print(f"    {s.id} @ {s.ref}")
+    console.print(f"  Phases: {', '.join(config.phases)}")
+    console.print(
+        f"  Variant A: {config.variant_a.label} "
+        f"(config={config.variant_a.config}, patch={config.variant_a.patch_set})"
+    )
+    if config.variant_a.workflow_set:
+        console.print(f"    workflow_set={config.variant_a.workflow_set}")
+    if config.variant_a.template_set:
+        console.print(f"    template_set={config.variant_a.template_set}")
+    console.print(
+        f"  Variant B: {config.variant_b.label} "
+        f"(config={config.variant_b.config}, patch={config.variant_b.patch_set})"
+    )
+    if config.variant_b.workflow_set:
+        console.print(f"    workflow_set={config.variant_b.workflow_set}")
+    if config.variant_b.template_set:
+        console.print(f"    template_set={config.variant_b.template_set}")
+    console.print(f"  Scorecard: {'yes' if config.scorecard else 'no'}")
+    console.print()
+
+    if dry_run:
+        runner = ABTestRunner(experiments_dir, project_path)
+        try:
+            runner._ensure_registries()
+            runner._validate_inputs(config)
+        except ConfigError as e:
+            _error(str(e))
+            raise typer.Exit(code=EXIT_CONFIG_ERROR) from None
+
+        console.print(
+            "[yellow][Dry run][/yellow] Configuration valid. "
+            "Run without --dry-run to execute."
+        )
+        raise typer.Exit(code=EXIT_SUCCESS)
+
+    runner = ABTestRunner(experiments_dir, project_path)
+    try:
+        result = runner.run(config)
+    except ConfigError as e:
+        _error(str(e))
+        raise typer.Exit(code=EXIT_CONFIG_ERROR) from None
+    except Exception as e:
+        _error(f"A/B test failed: {e}")
+        if verbose:
+            console.print_exception()
+        raise typer.Exit(code=EXIT_ERROR) from None
+
+    console.print()
+    console.print("[bold]Results:[/bold]")
+    for label, vr in [("A", result.variant_a), ("B", result.variant_b)]:
+        status_color = "green" if vr.status.value == "completed" else "red"
+        console.print(
+            f"  Variant {label} ({vr.label}): "
+            f"[{status_color}]{vr.status.value}[/{status_color}] "
+            f"({vr.stories_completed}/{vr.stories_attempted} stories, "
+            f"{format_duration_cli(vr.duration_seconds)})"
+        )
+        if vr.error:
+            console.print(f"    Error: {vr.error}")
+
+    if result.comparison_path:
+        console.print(f"  Comparison: {result.comparison_path}")
+    if result.scorecard_a_path:
+        console.print(f"  Scorecard A: {result.scorecard_a_path}")
+    if result.scorecard_b_path:
+        console.print(f"  Scorecard B: {result.scorecard_b_path}")
+
+    console.print(f"  Output: {result.result_dir}/")
+
+    both_ok = (
+        result.variant_a.status.value == "completed"
+        and result.variant_b.status.value == "completed"
+    )
+    if both_ok:
+        _success("A/B test completed successfully")
+    else:
+        raise typer.Exit(code=EXIT_ERROR)

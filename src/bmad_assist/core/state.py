@@ -302,8 +302,11 @@ def save_state(state: State, path: str | Path) -> None:
         data = state.model_dump(mode="json")
 
         # Write to temp file first (explicit UTF-8 for cross-platform)
+        # Use fsync to ensure data reaches disk before rename (durability on hard kill)
         with open(temp_path, "w", encoding="utf-8") as f:
             yaml.dump(data, f, default_flow_style=False, sort_keys=False, allow_unicode=True)
+            f.flush()
+            os.fsync(f.fileno())
 
         # Atomic replace (os.replace works cross-platform, unlike os.rename on Windows)
         os.replace(temp_path, path)

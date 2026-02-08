@@ -20,11 +20,13 @@ _GIT_TIMEOUT = 30
 # Patterns for files that should NEVER appear in code review diffs
 # These cause false positives when reviewers see cache/metadata content
 DEFAULT_EXCLUDE_PATTERNS: tuple[str, ...] = (
+    # BMAD generated artifacts (run tracking, benchmarks, reports, state)
+    ".bmad-assist/*",
+    "_bmad-output/*",
     # Cache and metadata
     "*.cache",
     "*.meta.yaml",
     "*.meta.yml",
-    ".bmad-assist/cache/*",
     ".bmad/cache/*",
     "__pycache__/*",
     "*.pyc",
@@ -203,16 +205,19 @@ def capture_filtered_diff(
     base: str | None = None,
     include_patterns: tuple[str, ...] | None = None,
     exclude_patterns: tuple[str, ...] | None = None,
-    max_lines: int = 500,
+    max_lines: int = 2000,
 ) -> str:
-    """Capture git diff with intelligent filtering.
+    """Capture git diff with intelligent filtering and prioritization.
+
+    Diff sections are sorted by file priority (source > test > config)
+    so that real code appears first when truncated by max_lines.
 
     Args:
         project_root: Path to git repository root.
         base: Base commit for diff (auto-detects if None).
         include_patterns: Glob patterns for files to include.
         exclude_patterns: Glob patterns for files to exclude.
-        max_lines: Maximum lines in output (truncated with marker).
+        max_lines: Maximum total lines in output (truncated with marker).
 
     Returns:
         Filtered diff content wrapped in markers, or empty string on error.
@@ -231,26 +236,25 @@ def capture_filtered_diff(
         # Git pathspec magic: :(exclude)pattern excludes matching files
         pathspec_excludes = [f":(exclude){p}" for p in exclude_patterns]
 
-        # Construct git diff command
-        cmd = [
-            "git",
-            "diff",
-            "--no-ext-diff",  # Disable external diff tools
-            "--stat",  # Include stat summary
-            "-p",  # Include patch
-            base,
-            "HEAD",
-            "--",  # Separator for pathspecs
-            *pathspec_excludes,
+        # Capture stat summary separately (lightweight, always included)
+        stat_cmd = [
+            "git", "diff", "--no-ext-diff", "--stat",
+            base, "HEAD", "--", *pathspec_excludes,
         ]
+        stat_result = subprocess.run(
+            stat_cmd, cwd=project_root, capture_output=True, text=True,
+            timeout=_GIT_TIMEOUT, errors="replace",
+        )
+        stat_section = stat_result.stdout if stat_result.returncode == 0 else ""
 
+        # Capture patch separately (will be prioritized)
+        patch_cmd = [
+            "git", "diff", "--no-ext-diff", "-p",
+            base, "HEAD", "--", *pathspec_excludes,
+        ]
         result = subprocess.run(
-            cmd,
-            cwd=project_root,
-            capture_output=True,
-            text=True,
-            timeout=_GIT_TIMEOUT,
-            errors="replace",
+            patch_cmd, cwd=project_root, capture_output=True, text=True,
+            timeout=_GIT_TIMEOUT, errors="replace",
         )
 
         if result.returncode != 0:
@@ -258,7 +262,15 @@ def capture_filtered_diff(
             logger.warning("git diff failed: %s", stderr_msg)
             return ""
 
-        diff_content = result.stdout
+        patch_content = result.stdout
+        if not patch_content.strip() and not stat_section.strip():
+            return ""
+
+        # Prioritize diff sections: source code first, tests second, config last
+        prioritized_patch = _prioritize_diff_sections(patch_content)
+
+        # Assemble: stat summary + prioritized patch
+        diff_content = stat_section.rstrip("\n") + "\n\n" + prioritized_patch
 
         # Truncate if needed
         lines = diff_content.split("\n")
@@ -279,6 +291,105 @@ def capture_filtered_diff(
     except OSError as e:
         logger.warning("git command failed: %s", e)
         return ""
+
+
+# File extensions considered source code (highest priority in diff)
+_SOURCE_EXTENSIONS: frozenset[str] = frozenset({
+    ".py", ".go", ".rs", ".java", ".kt", ".rb", ".swift",
+    ".c", ".cpp", ".cc", ".h", ".hpp",
+    ".js", ".jsx", ".ts", ".tsx", ".mjs", ".cjs",
+    ".svelte", ".vue",
+    ".css", ".scss", ".html",
+    ".sh", ".bash",
+})
+
+# File extensions considered config (lowest priority in diff)
+_CONFIG_EXTENSIONS: frozenset[str] = frozenset({
+    ".yaml", ".yml", ".json", ".toml", ".ini", ".cfg", ".conf",
+})
+
+# Path segments indicating test files (medium priority)
+_TEST_INDICATORS: tuple[str, ...] = (
+    "tests/", "test/", "__tests__/", "spec/",
+    "test_", "_test.", ".test.", ".spec.",
+)
+
+# Diff section header pattern
+_DIFF_SECTION_PATTERN = re.compile(r"^diff --git a/(.+?) b/(.+?)$", re.MULTILINE)
+
+
+def _classify_file_priority(filepath: str) -> int:
+    """Classify file for diff ordering. Lower number = higher priority.
+
+    Priority levels:
+        0 = Source code (src/, lib/, app/, or source extension)
+        1 = Test files
+        2 = Config files
+        3 = Everything else
+
+    """
+    from pathlib import PurePosixPath
+
+    ext = PurePosixPath(filepath).suffix.lower()
+
+    # Test files (check before source — test files may have source extensions)
+    if any(indicator in filepath.lower() for indicator in _TEST_INDICATORS):
+        return 1
+
+    # Source code
+    if ext in _SOURCE_EXTENSIONS:
+        return 0
+
+    # Config files
+    if ext in _CONFIG_EXTENSIONS:
+        return 2
+
+    return 3
+
+
+def _prioritize_diff_sections(patch_content: str) -> str:
+    """Reorder diff sections so source code appears first.
+
+    Splits the unified diff into per-file sections at 'diff --git' boundaries,
+    scores each by file type, and reassembles sorted by priority (source first).
+
+    Args:
+        patch_content: Raw git diff -p output.
+
+    Returns:
+        Reordered patch content.
+
+    """
+    if not patch_content.strip():
+        return patch_content
+
+    # Split into per-file sections at "diff --git" boundaries
+    sections: list[tuple[str, str]] = []  # (filepath, section_text)
+    current_path = ""
+    current_lines: list[str] = []
+
+    for line in patch_content.split("\n"):
+        header_match = _DIFF_SECTION_PATTERN.match(line)
+        if header_match:
+            # Save previous section
+            if current_lines:
+                sections.append((current_path, "\n".join(current_lines)))
+            current_path = header_match.group(2)  # b-side path
+            current_lines = [line]
+        else:
+            current_lines.append(line)
+
+    # Save last section
+    if current_lines:
+        sections.append((current_path, "\n".join(current_lines)))
+
+    if len(sections) <= 1:
+        return patch_content
+
+    # Sort by priority (source=0, test=1, config=2, other=3), then by path
+    sections.sort(key=lambda s: (_classify_file_priority(s[0]), s[0]))
+
+    return "\n".join(text for _, text in sections)
 
 
 def extract_files_from_diff(diff_content: str) -> list[str]:
@@ -364,6 +475,8 @@ def validate_diff_quality(
 
     # Classify files
     garbage_patterns = [
+        r"^\.bmad-assist/",
+        r"^_bmad-output/",
         r"\.cache$",
         r"\.meta\.ya?ml$",
         r"\.tpl\.xml$",
@@ -374,7 +487,6 @@ def validate_diff_quality(
         r"\.pytest_cache/",
         r"\.mypy_cache/",
         r"\.ruff_cache/",
-        r"\.bmad-assist/cache/",
         r"\.bmad/cache/",
         r"package-lock\.json$",
         r"\.lock$",

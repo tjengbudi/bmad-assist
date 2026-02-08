@@ -16,9 +16,10 @@ import json
 import logging
 import re
 from pathlib import Path
-from typing import Any
+from typing import Annotated, Any
 
 from pydantic import BaseModel, Field, ValidationError
+from pydantic.functional_validators import BeforeValidator
 
 from bmad_assist.core.exceptions import ProviderError, ProviderTimeoutError
 from bmad_assist.deep_verify.core.types import (
@@ -36,6 +37,7 @@ from bmad_assist.deep_verify.methods.constants import (
     DEFAULT_THRESHOLD,
     DEFAULT_TIMEOUT,
 )
+from bmad_assist.deep_verify.methods.validators import coerce_line_number
 from bmad_assist.providers import ClaudeSDKProvider
 
 logger = logging.getLogger(__name__)
@@ -124,7 +126,9 @@ class DomainExpertViolationData(BaseModel):
     rule_id: str = Field(..., min_length=1, description="ID of violated rule")
     rule_title: str = Field(..., min_length=1, description="Title of violated rule")
     evidence_quote: str = Field(..., min_length=1, description="Code snippet")
-    line_number: int | None = Field(None, description="Line number if identifiable")
+    line_number: Annotated[int | None, BeforeValidator(coerce_line_number)] = Field(
+        None, description="Line number if identifiable"
+    )
     violation_explanation: str = Field(..., min_length=1, description="How rule is violated")
     remediation: str = Field(..., min_length=1, description="How to fix")
     confidence: float = Field(..., ge=0.0, le=1.0, description="Confidence 0.0-1.0")
@@ -393,7 +397,7 @@ class DomainExpertMethod(BaseVerificationMethod):
             f"- rule_id: ID of the violated rule\n"
             f"- rule_title: Title of the violated rule\n"
             f"- evidence_quote: Code snippet showing the violation\n"
-            f"- line_number: Line number (if identifiable)\n"
+            f"- line_number: Integer line number or null if not identifiable (NEVER use task IDs, labels, or non-numeric values)\n"
             f"- violation_explanation: How the artifact violates the rule\n"
             f"- remediation: How to fix the violation\n"
             f"- confidence: 0.0-1.0 confidence score\n\n"

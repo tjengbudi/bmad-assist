@@ -1,6 +1,5 @@
-# bmad-assist configuration (optimized example)
-# This is an optimized reference config with recommended settings.
-# Copy to your project and customize provider settings as needed.
+config_name: opus-haiku-gemini-glm
+description: "Opus master + Haiku helper + Gemini fleet + GLM via Claude subprocess"
 
 project_name: project-name
 user_name: Tester
@@ -19,20 +18,18 @@ timeouts:
   validate_story_synthesis: 900 # 15 m
   dev_story: 3600               # 1 h
   code_review_synthesis: 1200   # 20 m
-  retrospective: 900            # 15 m
-  
+
 providers:
   # Default provider used for single-LLM phases when no phase_models specified
   master:
-    provider: kimi
-    model: kimi-code/kimi-for-coding
-    thinking: true
+    provider: claude
+    model: opus
     # model_name: glm-4.7
     # settings: ~/.claude/glm.json
 
   # Helper model for simple and fast tasks
   helper:
-    provider: claude-subprocess
+    provider: claude
     model: haiku
     # model_name: glm-4.5
     # settings: ~/.claude/glm.json
@@ -40,29 +37,29 @@ providers:
   # Additional providers for multi-provider scenarios
   multi:
     # Gemini providers
-    - provider: gemini
-      model: gemini-3-pro-preview
+    # - provider: gemini
+    #   model: gemini-3-pro-preview
     - provider: gemini
       model: gemini-3-flash-preview
-    # - provider: gemini
-    #   model: gemini-2.5-flash
+    - provider: gemini
+      model: gemini-2.5-flash
     - provider: gemini
       model: gemini-2.5-flash-lite
-    # - provider: gemini
-    #   model: gemini-2.5-flash-lite
-    - provider: kimi
-      model: kimi-code/kimi-for-coding
-      thinking: true
+    - provider: gemini
+      model: gemini-2.5-flash-lite
+    # - provider: kimi
+    #   model: kimi-code/kimi-for-coding
+    #   thinking: true
 
     # Claude subprocess providers
-    - provider: claude-subprocess
+    - provider: claude
       model: sonnet
       model_name: glm-4.7
       settings: ~/.claude/glm.json
-    # - provider: claude-subprocess
-    #   model: sonnet
-    #   model_name: glm-4.7
-    #   settings: ~/.claude/glm.json
+    - provider: claude
+      model: sonnet
+      model_name: glm-4.7
+      settings: ~/.claude/glm.json
 
     # OpenCode providers (NEW)
     # - provider: opencode
@@ -101,90 +98,96 @@ providers:
 phase_models:
   # Single-LLM phases - object format
   create_story:
-    provider: kimi
-    model: kimi-code/kimi-for-coding
-    thinking: true
+    provider: claude
+    model: opus
   validate_story_synthesis:
-    provider: kimi
-    model: kimi-code/kimi-for-coding
-    thinking: true
+    provider: claude
+    model: sonnet
+    model_name: glm-4.7
+    settings: ~/.claude/glm.json
   dev_story:
-    provider: kimi
-    model: kimi-code/kimi-for-coding
-    thinking: true
+    provider: claude
+    model: opus
   code_review_synthesis:
-    provider: kimi
-    model: kimi-code/kimi-for-coding
-    thinking: true
+    provider: claude
+    model: opus
   retrospective:
-    provider: kimi
-    model: kimi-code/kimi-for-coding
-    thinking: true
+    provider: claude
+    model: sonnet
+    model_name: glm-4.7
+    settings: ~/.claude/glm.json
 
   # Multi-LLM phases - array format
   # When phase_models defines a multi-LLM phase, ONLY the listed providers are used.
   # Master is NOT auto-added - you have full control over the validator/reviewer list.
   validate_story:
-    - provider: gemini
-      model: gemini-3-pro-preview
+    # - provider: gemini
+    #   model: gemini-3-pro-preview
     - provider: gemini
       model: gemini-3-flash-preview
     # - provider: gemini
     #   model: gemini-2.5-flash
-    - provider: gemini
-      model: gemini-2.5-flash-lite
     # - provider: gemini
     #   model: gemini-2.5-flash-lite
-    - provider: kimi
-      model: kimi-code/kimi-for-coding
-      thinking: true
-    - provider: kimi
-      model: kimi-code/kimi-for-coding
-      thinking: true
-    - provider: claude-subprocess
-      model: opus
+    # - provider: gemini
+    #   model: gemini-2.5-flash-lite
+    # - provider: kimi
+    #   model: kimi-code/kimi-for-coding
+    #   thinking: true
+    # - provider: kimi
+    #   model: kimi-code/kimi-for-coding
+    #   thinking: true
+    - provider: claude
+      model: sonnet
       model_name: glm-4.7
       settings: ~/.claude/glm.json
-    # - provider: claude-subprocess
-    #   model: opus
+    - provider: claude
+      model: sonnet
+      model_name: glm-4.7
+      settings: ~/.claude/glm.json
+    # - provider: claude
+    #   model: sonnet
     #   model_name: glm-4.7
     #   settings: ~/.claude/glm.json
-    # - provider: claude-subprocess
-    #   model: opus
-    #   model_name: glm-4.7
-    #   settings: ~/.claude/glm.json
+    - provider: claude
+      model: haiku
+    - provider: claude
+      model: opus
 
   # Same for code_review - full control over reviewer list
   code_review:
     - provider: gemini
       model: gemini-3-pro-preview
-    - provider: gemini
-      model: gemini-3-flash-preview
+    # - provider: gemini
+    #   model: gemini-3-flash-preview
     # - provider: gemini
     #   model: gemini-2.5-flash
-    - provider: gemini
-      model: gemini-2.5-flash-lite
     # - provider: gemini
     #   model: gemini-2.5-flash-lite
-    - provider: kimi
-      model: kimi-code/kimi-for-coding
-      thinking: true
-    - provider: kimi
-      model: kimi-code/kimi-for-coding
-      thinking: true
-    - provider: claude-subprocess
-      model: opus
+    # - provider: gemini
+    #   model: gemini-2.5-flash-lite
+    # - provider: kimi
+    #   model: kimi-code/kimi-for-coding
+    #   thinking: true
+    # - provider: kimi
+    #   model: kimi-code/kimi-for-coding
+    #   thinking: true
+    - provider: claude
+      model: sonnet
       model_name: glm-4.7
       settings: ~/.claude/glm.json
-    # - provider: claude-subprocess
-    #   model: opus
+    - provider: claude
+      model: sonnet
+      model_name: glm-4.7
+      settings: ~/.claude/glm.json
+    # - provider: claude
+    #   model: sonnet
     #   model_name: glm-4.7
     #   settings: ~/.claude/glm.json
-    # - provider: claude-subprocess
-    #   model: opus
-    #   model_name: glm-4.7
-    #   settings: ~/.claude/glm.json
-
+    - provider: claude
+      model: haiku
+    - provider: claude
+      model: opus
 
 # Compiler configuration
 compiler:
@@ -194,13 +197,13 @@ compiler:
   source_context:
     # Per-workflow token budgets (0-99 = disabled)
     budgets:
-      create_story: 30000
+      create_story: 60000
       validate_story: 15000
       validate_story_synthesis: 15000
       dev_story: 15000
-      code_review: 15000
-      code_review_synthesis: 15000
-      default: 20000             # Fallback for unlisted workflows
+      code_review: 30000
+      code_review_synthesis: 30000
+      default: 30000             # Fallback for unlisted workflows
 
     # File prioritization scoring weights
     scoring:
@@ -286,7 +289,7 @@ testarch:
 
 # Deep Verify configuration - multi-method artifact verification
 deep_verify:
-  enabled: true                       # Master switch for Deep Verify module
+  enabled: false                       # Master switch for Deep Verify module
 
   # Provider configuration (optional)
   # If not specified, uses global 'helper' provider from providers section
@@ -339,42 +342,46 @@ deep_verify:
   # Always-run methods (foundational)
   method_153_pattern_match:           # Regex pattern matching for vulnerabilities
     enabled: true
-    timeout_seconds: 120
+    timeout_seconds: 60
   method_154_boundary_analysis:       # Edge cases, off-by-one, null checks
     enabled: true
-    timeout_seconds: 120
+    timeout_seconds: 60
 
   # Conditional methods (run based on detected domains)
   method_155_assumption_surfacing:    # Hidden assumptions, race conditions (CONCURRENCY, API)
     enabled: true
-    timeout_seconds: 180
+    timeout_seconds: 90
   method_157_temporal_consistency:    # Race conditions, ordering (MESSAGING, STORAGE)
     enabled: true
-    timeout_seconds: 180
+    timeout_seconds: 90
   method_201_adversarial_review:      # Attacks, exploits, malicious input (SECURITY, API)
     enabled: true
-    timeout_seconds: 180
+    timeout_seconds: 120
   method_203_domain_expert:           # LLM simulates domain expert (all domains)
     enabled: true
-    timeout_seconds: 180
+    timeout_seconds: 120
   method_204_integration_analysis:    # External service failures (API, MESSAGING)
     enabled: true
-    timeout_seconds: 180
+    timeout_seconds: 90
   method_205_worst_case:              # Worst-case scenario construction (CONCURRENCY, MESSAGING)
     enabled: true
-    timeout_seconds: 180
+    timeout_seconds: 90
+
+security_agent:
+  enabled: false
+  max_findings: 15
 
 notifications:
-  enabled: true
-  providers:
-    - type: telegram
-      bot_token: "${TELEGRAM_BOT_TOKEN}"
-      chat_id: "${TELEGRAM_CHAT_ID}"
-    - type: discord
-      webhook_url: "${DISCORD_WEBHOOK_URL}"
-  events:
-    - story_started
-    - story_completed
-    - phase_completed
-    - error_occurred
-    - anomaly_detected
+  enabled: false
+  # providers:
+  #   - type: telegram
+  #     bot_token: "${TELEGRAM_BOT_TOKEN}"
+  #     chat_id: "${TELEGRAM_CHAT_ID}"
+  #   - type: discord
+  #     webhook_url: "${DISCORD_WEBHOOK_URL}"
+  # events:
+  #   - story_started
+  #   - story_completed
+  #   - phase_completed
+  #   - error_occurred
+  #   - anomaly_detected

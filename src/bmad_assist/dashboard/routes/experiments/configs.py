@@ -67,14 +67,12 @@ async def get_experiments_configs(request: Request) -> JSONResponse:
                 template = load_config_template(path)
 
                 # Build providers dict
-                providers = {
-                    "master": template.providers.master.model_dump()
-                    if template.providers.master
-                    else None,
-                    "multi": [p.model_dump() for p in template.providers.multi]
-                    if template.providers.multi
-                    else [],
-                }
+                providers = {}
+                if template.providers is not None:
+                    providers = {
+                        "master": template.providers.master.model_dump(),
+                        "multi": [p.model_dump() for p in template.providers.multi],
+                    }
 
                 summaries.append(
                     ConfigSummary(
@@ -202,12 +200,12 @@ async def get_experiment_config(request: Request) -> JSONResponse:
         yaml_content = await get_yaml_content(str(config_path))
 
         # Build providers dict
-        providers = {
-            "master": template.providers.master.model_dump() if template.providers.master else None,
-            "multi": [p.model_dump() for p in template.providers.multi]
-            if template.providers.multi
-            else [],
-        }
+        providers = {}
+        if template.providers is not None:
+            providers = {
+                "master": template.providers.master.model_dump(),
+                "multi": [p.model_dump() for p in template.providers.multi],
+            }
 
         # Build response
         details = ConfigDetails(

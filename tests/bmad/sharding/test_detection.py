@@ -65,8 +65,21 @@ class TestResolveDocPath:
         assert path == sharded_dir
         assert is_sharded is True
 
-    def test_both_exist_sharded_dir_wins(self, tmp_path: Path) -> None:
-        """Sharded directory takes precedence when both exist."""
+    def test_both_exist_sharded_dir_wins_if_not_empty(self, tmp_path: Path) -> None:
+        """Sharded directory takes precedence when it contains files."""
+        single_file = tmp_path / "epics.md"
+        single_file.touch()
+        sharded_dir = tmp_path / "epics"
+        sharded_dir.mkdir()
+        (sharded_dir / "epic-1.md").touch()  # Add a shard
+
+        path, is_sharded = resolve_doc_path(tmp_path, "epics")
+
+        assert path == sharded_dir
+        assert is_sharded is True
+
+    def test_both_exist_empty_dir_loses(self, tmp_path: Path) -> None:
+        """Single file takes precedence if sharded directory is empty."""
         single_file = tmp_path / "epics.md"
         single_file.touch()
         sharded_dir = tmp_path / "epics"
@@ -74,10 +87,8 @@ class TestResolveDocPath:
 
         path, is_sharded = resolve_doc_path(tmp_path, "epics")
 
-        # Sharded directory takes precedence over single file
-        # This allows stub files to coexist with sharded directories
-        assert path == sharded_dir
-        assert is_sharded is True
+        assert path == single_file
+        assert is_sharded is False
 
     def test_neither_exists_defaults_to_single(self, tmp_path: Path) -> None:
         """Defaults to single-file pattern when neither exists."""

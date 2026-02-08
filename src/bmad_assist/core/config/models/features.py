@@ -113,6 +113,12 @@ class TimeoutsConfig(BaseModel):
         description="Timeout for retrospective phase (None = use default)",
         json_schema_extra={"security": "safe", "ui_widget": "number", "unit": "s"},
     )
+    security_review: int | None = Field(
+        default=600,
+        ge=60,
+        description="Timeout for security review agent (default 600s, separate from code_review)",
+        json_schema_extra={"security": "safe", "ui_widget": "number", "unit": "s"},
+    )
 
     def get_timeout(self, phase: str) -> int:
         """Get timeout for a specific phase.

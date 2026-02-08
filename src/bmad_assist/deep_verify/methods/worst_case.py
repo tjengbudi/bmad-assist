@@ -16,9 +16,10 @@ import logging
 import re
 from dataclasses import dataclass
 from enum import Enum
-from typing import Any
+from typing import Annotated, Any
 
 from pydantic import BaseModel, Field, ValidationError, field_validator
+from pydantic.functional_validators import BeforeValidator
 
 from bmad_assist.core.exceptions import ProviderError, ProviderTimeoutError
 from bmad_assist.deep_verify.core.types import (
@@ -35,6 +36,7 @@ from bmad_assist.deep_verify.methods.constants import (
     DEFAULT_THRESHOLD,
     DEFAULT_TIMEOUT,
 )
+from bmad_assist.deep_verify.methods.validators import coerce_line_number
 from bmad_assist.providers import ClaudeSDKProvider
 
 logger = logging.getLogger(__name__)
@@ -329,7 +331,9 @@ class WorstCaseScenarioData(BaseModel):
     trigger: str = Field(..., min_length=1, description="What conditions trigger this scenario")
     cascade_effect: str = Field(..., min_length=1, description="How failure propagates")
     evidence_quote: str = Field(..., min_length=1, description="Code snippet showing vulnerability")
-    line_number: int | None = Field(None, description="Line number if identifiable")
+    line_number: Annotated[int | None, BeforeValidator(coerce_line_number)] = Field(
+        None, description="Line number if identifiable"
+    )
     mitigation: str = Field(..., min_length=1, description="How to prevent or mitigate")
 
     @field_validator("category")
@@ -622,7 +626,7 @@ class WorstCaseMethod(BaseVerificationMethod):
             f"- trigger: What conditions trigger this scenario\n"
             f"- cascade_effect: How the failure propagates and impacts the system\n"
             f"- evidence_quote: Code snippet showing where vulnerability exists\n"
-            f"- line_number: Line number (if identifiable)\n"
+            f"- line_number: Integer line number or null if not identifiable (NEVER use task IDs, labels, or non-numeric values)\n"
             f"- mitigation: How to prevent or mitigate the scenario\n\n"
             f"Respond with JSON in this format:\n"
             f"{{\n"

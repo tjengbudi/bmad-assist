@@ -6,6 +6,7 @@ extracting YAML frontmatter metadata and markdown content without LLM calls.
 
 from __future__ import annotations
 
+import contextlib
 import logging
 import re
 from dataclasses import dataclass, field
@@ -60,15 +61,16 @@ NON_STANDARD_DEP_PATTERN = re.compile(r"([A-Z][A-Z0-9]*(?:-[A-Z0-9]+)+)", re.IGN
 CHECKBOX_CHECKED_PATTERN = re.compile(r"-\s*\[x\]", re.IGNORECASE)
 CHECKBOX_UNCHECKED_PATTERN = re.compile(r"-\s*\[\s*\]")
 
-# Pattern for multiple epics in a file: # Epic N: Title or ## Epic N: Title
+# Pattern for multiple epics in a file: # Epic N: Title OR ## Epic Name
 EPIC_HEADER_PATTERN = re.compile(
-    r"^#{1,2}\s+Epic\s+\d+:",
+    r"^#{1,3}\s+Epic\s+[\w-]+[:\s\t]*",
     re.MULTILINE,
 )
 
-# Pattern to extract epic number and title from header: # Epic 16: Real-time Dashboard
+# Pattern to extract epic number/ID and title from header:
+# # Epic 16: Real-time Dashboard OR ## Epic Correction Sprint [IN PROGRESS]
 EPIC_TITLE_PATTERN = re.compile(
-    r"^#\s+Epic\s+(\d+|[a-zA-Z][\w-]*):\s*(.+)$",
+    r"^#{1,3}\s+Epic\s+([\w-]+)[:\s\t]*(.*)$",
     re.MULTILINE,
 )
 
@@ -202,20 +204,31 @@ def _extract_estimate(section: str) -> int | None:
     return None
 
 
-def _extract_status(section: str) -> str | None:
-    """Extract explicit status from a story section.
+def _extract_status(section: str, header: str = "") -> str | None:
+    """Extract explicit status from a story section or its header.
+
+    Checks for **Status:** field first, then looks for [STATUS] in the header.
 
     Args:
         section: The markdown content of a story section.
+        header: The header text of the story.
 
     Returns:
         The status string (cleaned), or None if no explicit status is found.
 
     """
+    # 1. Check for **Status:** field
     match = STATUS_PATTERN.search(section)
     if match:
         # Clean up: strip whitespace and trailing asterisks (typos like "done**")
         return match.group(1).strip().rstrip("*").strip()
+
+    # 2. Check for [STATUS] in header (e.g., "[DONE]", "[IN PROGRESS]", "[BACKLOG]")
+    if header:
+        status_match = re.search(r"\[(DONE|IN PROGRESS|BACKLOG|TODO|READY)\]", header, re.IGNORECASE)
+        if status_match:
+            return status_match.group(1).lower()
+
     return None
 
 
@@ -236,7 +249,7 @@ def _extract_priority(section: str) -> str | None:
 
 
 def _has_story_anchor(section: str) -> bool:
-    """Check if section contains a story anchor (Status or Priority).
+    """Check if section contains a story anchor (Status, Priority, or bracketed status).
 
     Used by fallback parser to detect story boundaries.
 
@@ -244,10 +257,15 @@ def _has_story_anchor(section: str) -> bool:
         section: The markdown content of a story section.
 
     Returns:
-        True if section contains **Status:** or **Priority:** field.
+        True if section contains **Status:**, **Priority:**, or [STATUS] anchor.
 
     """
-    return bool(STATUS_PATTERN.search(section) or PRIORITY_PATTERN.search(section))
+    if STATUS_PATTERN.search(section) or PRIORITY_PATTERN.search(section):
+        return True
+
+    # Check for [STATUS] in headers or text
+    status_match = re.search(r"\[(DONE|IN PROGRESS|BACKLOG|TODO|READY)\]", section, re.IGNORECASE)
+    return bool(status_match)
 
 
 def _extract_dependencies(section: str) -> list[str]:
@@ -371,10 +389,11 @@ def _parse_fallback_story_sections(
     When only Priority is present (no Status), defaults status to "backlog".
     """
     result = _find_stories_section(content)
-    if result is None:
-        return []
-
-    section, _ = result
+    if result is not None:
+        section, _ = result
+    else:
+        # Fallback: use entire content if no Stories section found
+        section = content
 
     # Find all headers in section
     headers = list(re.finditer(r"^(#{2,})\s+(.+)$", section, re.MULTILINE))
@@ -394,30 +413,40 @@ def _parse_fallback_story_sections(
         area_end = headers[i + 1].start() if i + 1 < len(headers) else len(section)
         area = section[area_start:area_end]
 
-        # Check if this area has a story anchor (Status or Priority)
-        status = _extract_status(area)
-        priority = _extract_priority(area)
-
-        if status is None and priority is None:
-            continue  # Not a story, skip (e.g., phase header)
-
-        # If no explicit status but has priority, default to "backlog"
-        if status is None:
-            status = "backlog"
-
-        # Parse header: "CODE: Title" or just "Title"
+        # Parse header: "CODE: Title" or "Story: Title" or just "Title"
         header_text = header.group(2).strip()
         if not header_text:
             logger.warning("Empty header in %s, skipping", path)
             continue
 
+        # Check if this area has a story anchor (Status or Priority)
+        # Pass header text for status inference from [STATUS]
+        status = _extract_status(area, header_text)
+        priority = _extract_priority(area)
+
+        if status is None and priority is None:
+            # Check if AC checkboxes exist - if so, it's a story even without status field
+            criteria = _count_criteria(area)
+            if criteria[0] is None and criteria[1] is None:
+                continue  # Not a story, skip (e.g., phase header)
+
+        # If no explicit status but has priority or ACs, default to "backlog"
+        if status is None:
+            status = "backlog"
+
         if ":" in header_text:
             parts = header_text.split(":", 1)
             code = parts[0].strip()
+            # If code is "Story", it's not a real code (just a label)
+            if code.lower() == "story":
+                code = None
             title = parts[1].strip() if len(parts) > 1 and parts[1].strip() else header_text
         else:
             code = None
             title = header_text
+
+        # Strip bracketed status from title if it was used for status extraction
+        title = re.sub(r"\[(DONE|IN PROGRESS|BACKLOG|TODO|READY)\]", "", title, flags=re.IGNORECASE).strip()
 
         # Validate non-empty title
         if not title:
@@ -464,7 +493,7 @@ def _parse_story_sections(
 ) -> list[EpicStory]:
     """Extract stories from epic content.
 
-    Tries standard pattern first, falls back to Status-anchored detection.
+    Supports mixed formats by finding all headers and evaluating each section.
 
     Args:
         content: The markdown content of an epic file.
@@ -475,44 +504,46 @@ def _parse_story_sections(
         List of EpicStory objects extracted from the content.
 
     """
-    matches = list(STORY_HEADER_PATTERN.finditer(content))
+    # 1. Find all headers (h2-h4) to delimit generic sections
+    all_headers = list(re.finditer(r"^(#{2,})\s+(.+)$", content, re.MULTILINE))
 
-    if not matches:
-        # Fallback: try Status-anchored detection
-        if epic_num is not None:
-            return _parse_fallback_story_sections(content, epic_num, path)
-        return []
+    # 2. Extract standard Story X.Y matches
+    standard_matches = list(STORY_HEADER_PATTERN.finditer(content))
 
-    # Detect mixed format - standard found but there might be more non-standard
-    stories_section = _find_stories_section(content)
-    if stories_section and epic_num is not None:
-        section_content, _ = stories_section
-        status_count = len(re.findall(r"\*\*Status:\*\*", section_content, re.IGNORECASE))
-        if status_count > len(matches):
-            logger.info(
-                "Mixed story format detected in %s: %d standard, %d total Status fields. "
-                "Only standard stories parsed. Consider using consistent format.",
-                path,
-                len(matches),
-                status_count,
-            )
+    consumed_ranges: list[tuple[int, int]] = []
+    stories: list[EpicStory] = []
 
-    stories = []
-    for i, match in enumerate(matches):
+    # Parse standard stories first to establish baseline
+    for i, match in enumerate(standard_matches):
         try:
-            # Extract section content (from this header to next or end)
-            start = match.end()
-            end = matches[i + 1].start() if i + 1 < len(matches) else len(content)
-            section = content[start:end]
+            # Find the header in all_headers to determine where this section ends
+            # The next header of ANY kind ends this section
+            header_idx = -1
+            for idx, h in enumerate(all_headers):
+                if h.start() == match.start():
+                    header_idx = idx
+                    break
 
+            start = match.end()
+            if header_idx != -1 and header_idx + 1 < len(all_headers):
+                end = all_headers[header_idx + 1].start()
+            else:
+                end = len(content)
+
+            consumed_ranges.append((match.start(), end))
+
+            section = content[start:end]
             epic_num_parsed, story_num, title = match.groups()
             number = f"{epic_num_parsed}.{story_num}"
 
-            # Extract details from section
+            # Extract details
             estimate = _extract_estimate(section)
-            status = _extract_status(section)
+            status = _extract_status(section, title)
             dependencies = _extract_dependencies(section)
             completed, total = _count_criteria(section)
+
+            # Clean title
+            title = re.sub(r"\[(DONE|IN PROGRESS|BACKLOG|TODO|READY)\]", "", title, flags=re.IGNORECASE).strip()
 
             stories.append(
                 EpicStory(
@@ -526,10 +557,30 @@ def _parse_story_sections(
                 )
             )
         except Exception:
-            # Log warning for malformed headers and continue
-            malformed_text = match.group(0) if match else "unknown"
-            logger.warning("Skipping malformed story header: %s", malformed_text)
+            logger.warning("Skipping malformed story header in %s", path)
             continue
+
+    # 3. Scan gaps for non-standard stories
+    if epic_num is not None:
+        last_pos = 0
+        gaps: list[str] = []
+        # Sort ranges to find gaps between standard stories
+        for start, end in sorted(consumed_ranges):
+            if start > last_pos:
+                gaps.append(content[last_pos:start])
+            last_pos = end
+        if last_pos < len(content):
+            gaps.append(content[last_pos:])
+
+        for gap in gaps:
+            # Only use fallback if gap has story potential
+            if _has_story_anchor(gap):
+                gap_stories = _parse_fallback_story_sections(gap, epic_num, path)
+                for gs in gap_stories:
+                    # Number them sequentially after existing stories
+                    story_num = len(stories) + 1
+                    gs.number = f"{epic_num}.{story_num}"
+                    stories.append(gs)
 
     return stories
 
@@ -590,7 +641,29 @@ def parse_epic_file(path: str | Path) -> EpicDocument:
                     title = header_match.group(2).strip()
 
     # Parse story sections from content
-    stories = _parse_story_sections(doc.content, epic_num, doc.path)
+    if is_multi_epic:
+        # For multi-epic files, split by Epic headers to maintain context for fallback numbering
+        epic_headers = list(EPIC_TITLE_PATTERN.finditer(doc.content))
+        all_stories: list[EpicStory] = []
+
+        for i, header in enumerate(epic_headers):
+            # Extract block content for this Epic
+            start = header.end()
+            end = epic_headers[i + 1].start() if i + 1 < len(epic_headers) else len(doc.content)
+            block_content = doc.content[start:end]
+
+            # Extract epic ID from header to use for sequential numbering gaps
+            block_epic_id = header.group(1)
+            with contextlib.suppress(ValueError):
+                block_epic_id = int(block_epic_id)
+
+            block_stories = _parse_story_sections(block_content, block_epic_id, doc.path)
+            all_stories.extend(block_stories)
+
+        stories = all_stories
+    else:
+        # Single epic file
+        stories = _parse_story_sections(doc.content, epic_num, doc.path)
 
     return EpicDocument(
         epic_num=epic_num,

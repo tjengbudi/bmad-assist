@@ -2,6 +2,110 @@
 
 All notable changes to bmad-assist are documented in this file.
 
+## [0.4.25] - 2026-02-08
+
+### Added
+- **A/B Workflow Tester** - Comparative workflow testing with git worktree isolation, per-story ref checkouts, artifact snapshots, LLM analysis, workflow/template sets, and full config pass-through per variant
+- **Deep Verify Synthesis: Grouped Findings** - Findings grouped by `file_path` with prioritization
+
+### Performance
+- **Providers: CPU/Memory Hotspots** - Replace busy-wait poll loop in `claude.py` with blocking `process.wait()` (10→2 wakeups/sec); reduce pause polling from 100ms to 2s; add `timeout=10` to `thread.join()` in all 8 subprocess providers
+
+### Changed
+- **Claude Provider: `claude` is now primary** - Use `provider: claude` (SDK-based) instead of `provider: claude-subprocess` (legacy). SDK provider now supports streaming input, cancel, display_model, and prefers system CLI. `claude-subprocess` is retained for benchmarking only. Upgrade `claude-agent-sdk` 0.1.20 → 0.1.33
+
+### Fixed
+- **A/B: Worktree Artifact Bleed** - Gitignored artifact dirs leaked between stories; now purged before each ref checkout
+- **A/B: Hardcoded Provider** - Analysis used hardcoded `claude-sdk`/`opus` instead of master provider from config
+- **Scorecard: Float Rounding** - Round scores to prevent IEEE 754 artifacts in YAML
+
+## [0.4.24] - 2026-02-07
+
+### Changed
+- **Config: .example Convention** - Renamed `bmad-assist.yaml` to `bmad-assist.yaml.example` in published repo; user config (`bmad-assist.yaml`) is now gitignored. Standard copy-and-customize pattern
+
+### Performance
+- **Deep Verify: Batch Boundary Analysis** - Consolidate per-finding boundary analysis into single LLM call, reducing token usage and latency in code review phase
+
+### Fixed
+- **Security Review: 0% Detection Rate** - Security agent received empty diffs after artifact exclusions; fixed source code extraction and pattern matching
+- **Deep Verify: File List Extraction** - Regex was extracting file descriptions instead of paths from DV output
+- **Deep Verify: DV Report Aggregation** - Aggregate per-file DV results into single archival report during code review phase
+- **Scorecard: Broken Metric** - Replaced non-functional `stories_completed` with `test_to_code_ratio` metric
+- **Dashboard: Mixed ID Sorting** - Resolve `TypeError` when sorting stories with mixed numeric/string IDs (PR #11, thanks [@DevRGT](https://github.com/DevRGT))
+
+## [0.4.23] - 2026-02-06
+
+### Added
+- **Scorecard v2.0** - Restructured `code_quality` (20 pts) into five sub-metrics: linting, complexity, security, test_pass_rate, code_maturity. KLOC-normalized gradient for gosec with FP filtering. Correctness proxy advisory checks for Go
+
+### Fixed
+- **Security Review: Zero Findings** - Diffs were dominated by `.bmad-assist/` and `_bmad-output/` metadata YAML; all source code was truncated away at `max_lines=500`. Added BMAD artifact exclusions to `DEFAULT_EXCLUDE_PATTERNS`, raised `max_lines` to 2000, and added diff section prioritization (source > test > config > other)
+- **Security Review: Missing Metadata** - `detected_languages` and `patterns_loaded` were not propagated from `SecurityReviewCompiler` to `run_security_review()` via `CompiledWorkflow.variables`
+- **Deep Verify: Domains Not Propagated** - Detected domains were never passed through the engine call chain (`_run_methods_with_errors` → `_run_single_method_with_result` → `_run_single_method`). Methods received `domains=None`, causing `_should_run_for_domains()` to return False and 6/8 methods to skip instantly with 0 findings
+- **Loop: Epic Transition on Resume** - `advance_to_next_epic` failed when current epic was missing from filtered list after resume. Now jumps to first available epic (PR #2, thanks [@DevRGT](https://github.com/DevRGT))
+- **Parser: Bracketed Statuses** - Support `[DONE]`/`[IN PROGRESS]` status format in story headers and mixed standard/fallback story formats in epic files (PR #1, thanks [@DevRGT](https://github.com/DevRGT))
+- **Deep Verify: Helper Config** - Propagate helper provider config to `DomainDetector`; add pricing for `zai-coding-plan` models
+- **Sharding: Empty Directory Precedence** - Single file now takes precedence over empty sharded directory
+- **Anonymization: Provider Leak** - Removed provider/model fields from report YAML frontmatter that defeated reviewer anonymization; deanonymization mapping in `.bmad-assist/cache/` already stores this info
+- **CI: Lint/Type Errors** - Fix 4 mypy errors in `epic_transitions.py`, 16 ruff issues in parser/sharding modules
+- **Dependencies** - Remove `typer[all]` extra, bump typer to 0.21.1
+- **Compiler** - Remove `__init__.py` from hyphenated `security-review` workflow directory (mypy fix)
+
+## [0.4.22] - 2026-02-06
+
+### Added
+- **Security Review Agent** - Parallel security-focused reviewer in code review phase with CWE classification, confidence scoring, and severity-based handling in synthesis
+- **Deep Verify: Phase Type** - `phase_type` field in DV reports distinguishes validation vs code review findings
+- **Logging: Restructured Levels** - Verbose/debug/full-stream logging levels for granular output control
+
+### Changed
+- **Synthesis: Remove METRICS_JSON** - Removed LLM-generated quality/consensus metrics from both synthesis workflows. Fields like `follows_template` (always true), `missed_findings` (always 0), `internal_consistency` (self-assessment) provided no signal. Saves LLM context and time per synthesis run. Data recoverable from synthesis reports post-hoc if needed
+
+### Fixed
+- **Deep Verify: Line Number Coercion** - Coerce LLM `line_number` strings to int in all deep-verify methods
+- **Security Reports: Zero Findings** - Always save archival security report even with zero findings
+- **Loop: Resume After Hard Kill** - Preserve resume position after hard kill via fsync + phase restore
+- **Git: Empty Repo Branch Creation** - Use atomic `checkout -b` in `ensure_epic_branch` for empty repo support (no HEAD)
+- **Providers: Reasoning Effort Param** - Add `reasoning_effort` parameter to all provider `invoke()` signatures
+
+## [0.4.21] - 2026-02-06
+
+### Added
+- **Bundled Compiled Templates** - Ship pre-compiled `.tpl.xml` + `.meta.yaml` in the package for deterministic zero-LLM workflow compilation. Default-patch users get instant templates without LLM calls; custom-patch users keep existing recompile flow via hash-based detection
+- **TEA Default Patches** - Synced 8 TEA workflow patches + `defaults-testarch.yaml` to `default_patches/`
+- **Codex: Reasoning Effort Support** - New `reasoning_effort` config field for Codex provider (minimal/low/medium/high/xhigh), passed via `-c model_reasoning_effort` flag. Supported in master, multi, and phase_models configs
+
+### Fixed
+- **Benchmarking: Extraction Model Mismatch** - Extraction was using `model_name` (display-only, e.g., "glm-4.5") instead of `model` (CLI identifier, e.g., "haiku") for provider invocation, causing 100% extraction failure when `model_name` was set
+- **Codex: ARG_MAX Overflow** - Codex provider passed compiled prompt as CLI argument, hitting OS `ARG_MAX` limit on large prompts (>=100KB). Now uses `platform_command` temp file approach matching copilot/cursor pattern
+- **Deep Verify: Go Module Filtering** - Filter Go module dependencies from DV File List extraction
+- **Deep Verify: Null Evidence Fields** - Accept null `evidence_quote`/`explanation` in DV checklist response
+- **Deep Verify: Markdown Artifacts** - Filter markdown artifacts from DV File List extraction
+- **Compiler: XML Corruption** - Remove literal `<o>` from patch instructions to prevent XML corruption
+- **Config: Path Fallbacks** - `project_knowledge` existence check with `epics_dir` and sprint `docs/` fallback; defaults to `planning_artifacts` with `docs/` as fallback
+- **Compiler: Epic Headers** - Support `#`/`##`/`###` epic headers in `EPIC_TITLE_PATTERN`
+- **Compiler: DV Settings Passthrough** - Pass `timeout`, `settings`, and `thinking` from config to DV methods; pass `display_model` and `settings_file` through patch compiler
+- **Compiler: Cache Invalidation** - Template `.md` changes now properly invalidate compiled cache; added `defaults_hash` tracking to `CacheMeta` and `TemplateMetadata`; package fallback for `_load_defaults_file`
+- **Epic Discovery: Empty Planning Artifacts** - When `planning-artifacts/` exists but is empty, epic loader now falls back to `paths.epics_dir` (which searches `docs/epics/`), fixing "No epics found in project" error
+- **Lint: Ruff N812** - Rename `BMAD_ASSIST_VERSION` import to satisfy ruff N812 rule
+
+## [0.4.20] - 2026-02-05
+
+> Massive thanks to [@LKrysik](https://github.com/LKrysik) for the Deep Verify system - a game-changing addition to bmad-assist's quality pipeline.
+
+### Added
+- **Deep Verify: Synthesis Instructions** - Both synthesis workflows now include step 1.5 guiding LLM on DV finding severity handling, cross-referencing with reviewer/validator findings, and structured output sections
+- **Deep Verify: Output Templates** - Synthesis reports now include "Deep Verify Integration" section with DV Findings Fixed/Addressed, Dismissed, and DV-Reviewer/Validator Overlap subsections
+- **Story File Rescue** - Automatic retry with fresh story file when story content is missing or corrupt, with configurable previous stories limit (default: 1)
+
+### Fixed
+- **Deep Verify: Schema Mismatch** - DV findings formatter now handles both handler dict schemas (`domains`/`methods`/`method` from code_review handler and `domains_detected`/`methods_executed`/`method_id` from serialize_validation_result)
+- **Deep Verify: Raw Dict in Prompt** - validate_story_synthesis was passing raw Python dict instead of formatted markdown to LLM; now uses shared `format_dv_findings_for_prompt()` formatter
+- **Deep Verify: Code Review Synthesis Missing DV** - code_review_synthesis compiler was not adding DV findings to prompt at all despite handler passing them in context
+- **Deep Verify: Story vs Compiled Prompt** - DV now analyzes the actual story file instead of the compiled prompt, producing relevant findings
+- **Deep Verify: Cache Aggregation** - Fixed DV cache aggregation for synthesis phase
+
 ## [0.4.19] - 2026-02-04
 
 ### Added

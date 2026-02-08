@@ -21,9 +21,10 @@ import logging
 import re
 from dataclasses import dataclass
 from enum import Enum
-from typing import Any
+from typing import Annotated, Any
 
 from pydantic import BaseModel, Field, ValidationError, field_validator
+from pydantic.functional_validators import BeforeValidator
 
 from bmad_assist.core.exceptions import ProviderError, ProviderTimeoutError
 from bmad_assist.deep_verify.core.types import (
@@ -40,6 +41,7 @@ from bmad_assist.deep_verify.methods.constants import (
     DEFAULT_THRESHOLD,
     DEFAULT_TIMEOUT,
 )
+from bmad_assist.deep_verify.methods.validators import coerce_line_number
 from bmad_assist.providers import ClaudeSDKProvider
 
 logger = logging.getLogger(__name__)
@@ -345,7 +347,9 @@ class IntegrationIssueData(BaseModel):
     category: str = Field(..., min_length=1, description="Integration category")
     risk: str = Field(..., min_length=1, description="Risk level assessment")
     evidence_quote: str = Field(..., min_length=1, description="Code snippet showing issue")
-    line_number: int | None = Field(None, description="Line number if identifiable")
+    line_number: Annotated[int | None, BeforeValidator(coerce_line_number)] = Field(
+        None, description="Line number if identifiable"
+    )
     consequences: str = Field(..., min_length=1, description="Consequences if issue manifests")
     recommendation: str = Field(..., min_length=1, description="How to fix the issue")
 
@@ -370,14 +374,6 @@ class IntegrationIssueData(BaseModel):
         except ValueError as e:
             allowed_values = [risk.value for risk in IntegrationRiskLevel]
             raise ValueError(f"risk must be one of {allowed_values}, got {v}") from e
-
-    @field_validator("line_number")
-    @classmethod
-    def validate_line_number(cls, v: int | None) -> int | None:
-        """Validate line number is positive if provided."""
-        if v is not None and v < 1:
-            raise ValueError(f"line_number must be >= 1, got {v}")
-        return v
 
 
 class IntegrationAnalysisResponse(BaseModel):
@@ -654,7 +650,7 @@ class IntegrationAnalysisMethod(BaseVerificationMethod):
             f"- category: One of [contract, failure_modes, versioning, idempotency, retry]\n"
             f"- risk: One of [critical, high, medium, low]\n"
             f"- evidence_quote: Code snippet showing where issue exists\n"
-            f"- line_number: Line number (if identifiable)\n"
+            f"- line_number: Integer line number or null if not identifiable (NEVER use task IDs, labels, or non-numeric values)\n"
             f"- consequences: What happens if issue manifests\n"
             f"- recommendation: How to fix the issue\n\n"
             f"Respond with JSON in this format:\n"

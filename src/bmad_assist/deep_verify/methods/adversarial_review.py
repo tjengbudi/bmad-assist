@@ -16,9 +16,10 @@ import logging
 import re
 from dataclasses import dataclass
 from enum import Enum
-from typing import Any
+from typing import Annotated, Any
 
 from pydantic import BaseModel, Field, ValidationError, field_validator
+from pydantic.functional_validators import BeforeValidator
 
 from bmad_assist.core.exceptions import ProviderError, ProviderTimeoutError
 from bmad_assist.deep_verify.core.types import (
@@ -35,6 +36,7 @@ from bmad_assist.deep_verify.methods.constants import (
     DEFAULT_THRESHOLD,
     DEFAULT_TIMEOUT,
 )
+from bmad_assist.deep_verify.methods.validators import coerce_line_number
 from bmad_assist.providers import ClaudeSDKProvider
 
 logger = logging.getLogger(__name__)
@@ -347,7 +349,9 @@ class AdversarialVulnerabilityData(BaseModel):
     category: str = Field(..., min_length=1, description="Adversarial category")
     threat_level: str = Field(..., min_length=1, description="Threat level assessment")
     evidence_quote: str = Field(..., min_length=1, description="Code snippet showing vulnerability")
-    line_number: int | None = Field(None, description="Line number if identifiable")
+    line_number: Annotated[int | None, BeforeValidator(coerce_line_number)] = Field(
+        None, description="Line number if identifiable"
+    )
     attack_vector: str = Field(..., min_length=1, description="How attacker could exploit this")
     remediation: str = Field(..., min_length=1, description="How to fix or mitigate")
 
@@ -641,7 +645,7 @@ class AdversarialReviewMethod(BaseVerificationMethod):
             f"- category: One of [bypass, load, error_paths, edge_inputs]\n"
             f"- threat_level: One of [critical, high, medium, low]\n"
             f"- evidence_quote: Code snippet showing where vulnerability exists\n"
-            f"- line_number: Line number (if identifiable)\n"
+            f"- line_number: Integer line number or null if not identifiable (NEVER use task IDs, labels, or non-numeric values)\n"
             f"- attack_vector: How an attacker could exploit this\n"
             f"- remediation: How to fix or mitigate the vulnerability\n\n"
             f"Respond with JSON in this format:\n"

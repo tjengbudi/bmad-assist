@@ -10,6 +10,7 @@ Key functions:
 """
 
 import logging
+import sys
 from pathlib import Path
 
 from bmad_assist.cli_utils import console
@@ -80,7 +81,10 @@ def prompt_continuation(message: str) -> bool:
         return True
 
     logger.info("Prompting user: %s", message)
-    console.print(f"\n{message} [bold]\\[Y/q][/bold] ", end="")
+    # Use print() instead of console.print() to avoid Rich buffering issues
+    # that can cause truncated output before input()
+    print(f"\n{message} [Y/q] ", end="", flush=True)
+    sys.stdout.flush()  # Double-ensure flush before blocking on input()
 
     while True:
         try:
@@ -94,10 +98,7 @@ def prompt_continuation(message: str) -> bool:
                 return False
             else:
                 # Invalid input - re-prompt
-                console.print(
-                    "Invalid choice. Enter [bold]Y[/bold] to continue or [bold]q[/bold] to quit: ",
-                    end="",
-                )
+                print("Invalid choice. Enter Y to continue or q to quit: ", end="", flush=True)
 
         except (EOFError, KeyboardInterrupt):
             # Treat EOF/Ctrl+C as quit

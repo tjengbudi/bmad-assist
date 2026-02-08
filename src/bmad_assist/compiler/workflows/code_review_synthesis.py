@@ -36,6 +36,7 @@ from bmad_assist.compiler.shared_utils import (
     apply_post_process,
     context_snapshot,
     find_sprint_status_file,
+    format_dv_findings_for_prompt,
     get_stories_dir,
     load_workflow_template,
     resolve_story_file,
@@ -264,6 +265,41 @@ class CodeReviewSynthesisCompiler:
         # 1c. TEA Context (test-review findings) for synthesis decisions
         files.update(collect_tea_context(context, "code_review_synthesis", resolved))
 
+        # 1d. Deep Verify findings (if available) - high priority technical validation
+        dv_findings = context.resolved_variables.get("deep_verify_findings")
+        if dv_findings:
+            dv_content = format_dv_findings_for_prompt(dv_findings)
+            files["[Deep Verify Findings]"] = dv_content
+            logger.debug("Added Deep Verify findings to synthesis context")
+
+        # 1e. Security agent findings (if available)
+        security_findings = context.resolved_variables.get("security_findings")
+        if security_findings and isinstance(security_findings, dict):
+            sec_parts: list[str] = []
+            if security_findings.get("timed_out"):
+                sec_parts.append(
+                    "SECURITY REVIEW NOT COMPLETED — security analysis timed out, "
+                    "manual security review recommended\n"
+                )
+            findings_list = security_findings.get("findings", [])
+            if findings_list:
+                for f in findings_list:
+                    sec_parts.append(
+                        f"- [{f.get('severity', 'UNKNOWN')}] {f.get('cwe_id', 'CWE-?')}: "
+                        f"{f.get('title', 'Untitled')} "
+                        f"({f.get('file_path', '?')}:{f.get('line_number', '?')}) "
+                        f"[confidence={f.get('confidence', '?')}]\n"
+                        f"  {f.get('description', '')}"
+                    )
+                    if f.get("remediation"):
+                        sec_parts.append(f"  Remediation: {f['remediation']}")
+            if sec_parts:
+                files["[Security Findings]"] = "\n".join(sec_parts)
+                logger.debug(
+                    "Added security findings to synthesis context: %d findings",
+                    len(findings_list),
+                )
+
         # 2. Reviews (each as a separate file for clean CDATA handling)
         # Sort by reviewer_id for deterministic ordering
         sorted_reviews = sorted(reviews, key=lambda r: r.validator_id)
@@ -353,9 +389,10 @@ class CodeReviewSynthesisCompiler:
         # Count files for logging (excluding virtual paths starting with [)
         file_count = len([k for k in files if not k.startswith("[")])
         logger.info(
-            "Built synthesis context with %d files and %d reviews for story %s.%s",
+            "Built synthesis context with %d files, %d reviews%s for story %s.%s",
             file_count,
             len(reviews),
+            ", and DV findings" if "[Deep Verify Findings]" in files else "",
             epic_num,
             story_num,
         )

@@ -52,6 +52,7 @@ from bmad_assist.providers.base import (
     ProviderResult,
     calculate_retry_delay,
     format_tag,
+    is_full_stream,
     is_transient_error,
     should_print_progress,
     start_stream_reader_threads,
@@ -142,6 +143,7 @@ class CopilotProvider(BaseProvider):
         display_model: str | None = None,
         thinking: bool | None = None,
         cancel_token: threading.Event | None = None,
+        reasoning_effort: str | None = None,
     ) -> ProviderResult:
         """Execute Copilot CLI with the given prompt.
 
@@ -239,7 +241,13 @@ class CopilotProvider(BaseProvider):
                     if should_print_progress():
                         stripped = line.rstrip()
                         tag = format_tag("OUT", color_index)
-                        write_progress(f"{tag} {stripped}")
+                        if is_full_stream():
+                            write_progress(f"{tag} {stripped}")
+                        else:
+                            preview = stripped[:200]
+                            if len(stripped) > 200:
+                                preview += "..."
+                            write_progress(f"{tag} {preview}")
 
                 def _stderr_cb(line: str) -> None:
                     if should_print_progress():
@@ -305,8 +313,8 @@ class CopilotProvider(BaseProvider):
                             partial_result=partial_result,
                         ) from None
 
-                    stdout_thread.join()
-                    stderr_thread.join()
+                    stdout_thread.join(timeout=10)
+                    stderr_thread.join(timeout=10)
 
                 except FileNotFoundError as e:
                     logger.error("Copilot CLI not found in PATH")

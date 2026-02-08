@@ -1010,16 +1010,16 @@ This ends the Stories section.
         with caplog.at_level(logging.INFO):
             epic = parse_epic_file(epic_file)
 
-        # Should only parse the 2 standard stories (fallback not triggered)
-        assert len(epic.stories) == 2
+        # Should now parse ALL stories (both standard and non-standard)
+        assert len(epic.stories) == 4
         assert epic.stories[0].number == "1.1"
         assert epic.stories[1].number == "1.2"
+        # Non-standard stories are numbered sequentially after standard ones
+        assert epic.stories[2].number == "1.3"
+        assert epic.stories[3].number == "1.4"
         assert epic.stories[0].code is None  # Standard format has no code
 
-        # Should log about mixed format (2 standard, 4 total Status fields)
-        assert any(
-            "Mixed story format" in record.message for record in caplog.records
-        )
+        # No logging expected since this is now supported
 
     def test_standard_format_unchanged(self, tmp_path: Path) -> None:
         """Test standard Story X.Y format still works (backward compat)."""

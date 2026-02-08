@@ -260,10 +260,42 @@ def format_tag(tag: str, color_index: int | None) -> str:
 _last_log_level_check: float = 0.0
 _LOG_LEVEL_CHECK_INTERVAL: float = 1.0  # Check control file at most once per second
 
+# =============================================================================
+# Stream Control Flags (decoupled from log level)
+# =============================================================================
+
+_stream_enabled: bool = False  # Whether to show LLM stream output at all
+_full_stream_enabled: bool = False  # Whether to show full untruncated stream
+
+
+def set_stream_mode(enabled: bool, full: bool = False) -> None:
+    """Configure LLM stream output visibility.
+
+    Args:
+        enabled: Whether to show LLM stream output (truncated previews).
+        full: Whether to show full untruncated stream output. Only meaningful
+            when enabled=True.
+
+    """
+    global _stream_enabled, _full_stream_enabled
+    _stream_enabled = enabled
+    _full_stream_enabled = full if enabled else False
+
+
+def is_stream_enabled() -> bool:
+    """Check if LLM stream output is enabled."""
+    return _stream_enabled
+
+
+def is_full_stream() -> bool:
+    """Check if full untruncated stream output is enabled."""
+    return _full_stream_enabled
+
 
 def should_print_progress() -> bool:
-    """Check if workflow progress should be printed (INFO+ level).
+    """Check if LLM stream output should be printed.
 
+    Decoupled from log level — controlled by set_stream_mode().
     Dynamically checks the control file for log level changes (rate-limited
     to once per second) so dashboard log level changes take effect immediately.
     """
@@ -276,11 +308,15 @@ def should_print_progress() -> bool:
         _last_log_level_check = now
         _check_log_level_control_file()
 
-    return logger.isEnabledFor(logging.INFO)
+    return _stream_enabled
 
 
 def _check_log_level_control_file() -> None:
-    """Check control file and update logger level if changed."""
+    """Check control file and update logger level if changed.
+
+    Also updates stream mode: DEBUG enables stream, other levels disable it.
+    """
+    global _stream_enabled
     try:
         from bmad_assist.core.paths import get_paths
 
@@ -291,7 +327,9 @@ def _check_log_level_control_file() -> None:
             if level in ("DEBUG", "INFO", "WARNING"):
                 from bmad_assist.cli_utils import update_log_level
 
-                update_log_level(level)
+                if update_log_level(level):
+                    # Sync stream mode with log level changes from dashboard
+                    _stream_enabled = level == "DEBUG"
     except Exception:
         pass  # Silent fail - paths not initialized or file missing
 
@@ -708,6 +746,7 @@ class BaseProvider(ABC):
         display_model: str | None = None,
         thinking: bool | None = None,
         cancel_token: threading.Event | None = None,
+        reasoning_effort: str | None = None,
     ) -> ProviderResult:
         """Execute LLM provider with the given prompt.
 
@@ -743,6 +782,10 @@ class BaseProvider(ABC):
                 and terminate gracefully if True. For subprocess providers,
                 this triggers process termination. For SDK providers, this
                 should cancel pending requests. Default: None (no cancellation).
+            reasoning_effort: Reasoning effort level for supported providers.
+                Valid values: minimal, low, medium, high, xhigh. Currently
+                only codex provider supports this via -c model_reasoning_effort.
+                Other providers should ignore.
 
         Returns:
             ProviderResult containing stdout, stderr, exit code, and timing.

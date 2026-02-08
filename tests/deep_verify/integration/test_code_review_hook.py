@@ -108,9 +108,19 @@ def temp_project_path(tmp_path):
 
 
 @pytest.fixture
-def sample_story_file(temp_project_path):
+def mock_paths(temp_project_path):
+    """Create mock ProjectPaths with stories_dir pointing to temp_project_path."""
+    from unittest.mock import MagicMock
+    mock_project_paths = MagicMock()
+    # stories_dir is the implementation_artifacts dir (no "stories" subfolder)
+    mock_project_paths.stories_dir = temp_project_path / "_bmad-output" / "implementation-artifacts"
+    return mock_project_paths
+
+
+@pytest.fixture
+def sample_story_file(temp_project_path, mock_paths):
     """Create a sample story file with File List section."""
-    stories_dir = temp_project_path / "_bmad-output" / "implementation-artifacts" / "stories"
+    stories_dir = mock_paths.stories_dir
     stories_dir.mkdir(parents=True, exist_ok=True)
 
     story_content = """# Story 26.20: Code Review Integration Hook
@@ -377,7 +387,7 @@ class TestRunDeepVerifyCodeReview:
 class TestResolveCodeFiles:
     """Tests for _resolve_code_files function."""
 
-    def test_resolve_from_story_file_list(self, temp_project_path, sample_story_file):
+    def test_resolve_from_story_file_list(self, temp_project_path, sample_story_file, mock_paths):
         """Test resolving code files from story File List."""
         # Create the referenced files
         src_dir = temp_project_path / "src"
@@ -388,7 +398,9 @@ class TestResolveCodeFiles:
         tests_dir.mkdir(parents=True, exist_ok=True)
         (tests_dir / "test_main.py").write_text("def test_main(): pass")
 
-        files = _resolve_code_files(temp_project_path, 26, 20)
+        with patch("bmad_assist.core.paths.get_paths") as mock_get_paths:
+            mock_get_paths.return_value = mock_paths
+            files = _resolve_code_files(temp_project_path, 26, 20)
 
         assert len(files) == 3
         file_paths = [str(f[0]) for f in files]
@@ -396,38 +408,47 @@ class TestResolveCodeFiles:
         assert any("utils.py" in p for p in file_paths)
         assert any("test_main.py" in p for p in file_paths)
 
-    def test_no_story_file(self, temp_project_path):
+    def test_no_story_file(self, temp_project_path, mock_paths):
         """Test when no story file exists."""
-        files = _resolve_code_files(temp_project_path, 99, 99)
+        # Ensure stories_dir exists but is empty
+        mock_paths.stories_dir.mkdir(parents=True, exist_ok=True)
+        with patch("bmad_assist.core.paths.get_paths") as mock_get_paths:
+            mock_get_paths.return_value = mock_paths
+            files = _resolve_code_files(temp_project_path, 99, 99)
         assert files == []
 
-    def test_no_file_list_section(self, temp_project_path):
+    def test_no_file_list_section(self, temp_project_path, mock_paths):
         """Test when story file has no File List section."""
-        stories_dir = temp_project_path / "_bmad-output" / "implementation-artifacts" / "stories"
+        stories_dir = mock_paths.stories_dir
         stories_dir.mkdir(parents=True, exist_ok=True)
         story_file = stories_dir / "26-21-test.md"
         story_file.write_text("# Story without File List\n\nSome content\n")
 
-        files = _resolve_code_files(temp_project_path, 26, 21)
+        with patch("bmad_assist.core.paths.get_paths") as mock_get_paths:
+            mock_get_paths.return_value = mock_paths
+            files = _resolve_code_files(temp_project_path, 26, 21)
         assert files == []
 
-    def test_missing_files_logged(self, temp_project_path, sample_story_file, caplog):
+    def test_missing_files_logged(self, temp_project_path, sample_story_file, mock_paths, caplog):
         """Test that missing files are logged and skipped."""
         import logging
 
         # Don't create the files - they should be logged as missing
         with caplog.at_level(logging.WARNING):
-            files = _resolve_code_files(temp_project_path, 26, 20)
+            with patch("bmad_assist.core.paths.get_paths") as mock_get_paths:
+                mock_get_paths.return_value = mock_paths
+                files = _resolve_code_files(temp_project_path, 26, 20)
 
         # All files should be skipped since they don't exist
         assert len(files) == 0
         # Check that missing files were logged
         assert any("File not found" in msg for msg in caplog.messages)
 
-    def test_path_traversal_prevention(self, temp_project_path, sample_story_file):
+    def test_path_traversal_prevention(self, temp_project_path, mock_paths):
         """Test that path traversal attempts are blocked."""
         # Create a story with malicious file path
-        stories_dir = temp_project_path / "_bmad-output" / "implementation-artifacts" / "stories"
+        stories_dir = mock_paths.stories_dir
+        stories_dir.mkdir(parents=True, exist_ok=True)
         story_file = stories_dir / "26-99-test.md"
         story_file.write_text("""# Story
 
@@ -441,15 +462,17 @@ class TestResolveCodeFiles:
         src_dir.mkdir(parents=True, exist_ok=True)
         (src_dir / "main.py").write_text("def main(): pass")
 
-        files = _resolve_code_files(temp_project_path, 26, 99)
+        with patch("bmad_assist.core.paths.get_paths") as mock_get_paths:
+            mock_get_paths.return_value = mock_paths
+            files = _resolve_code_files(temp_project_path, 26, 99)
 
         # Only the valid file should be included
         assert len(files) == 1
         assert "main.py" in str(files[0][0])
 
-    def test_size_limit(self, temp_project_path):
+    def test_size_limit(self, temp_project_path, mock_paths):
         """Test that code size limit is enforced."""
-        stories_dir = temp_project_path / "_bmad-output" / "implementation-artifacts" / "stories"
+        stories_dir = mock_paths.stories_dir
         stories_dir.mkdir(parents=True, exist_ok=True)
         story_file = stories_dir / "26-30-test.md"
 
@@ -465,7 +488,9 @@ class TestResolveCodeFiles:
         for i in range(10):
             (src_dir / f"large_{i}.py").write_text("x" * (15 * 1024))
 
-        files = _resolve_code_files(temp_project_path, 26, 30)
+        with patch("bmad_assist.core.paths.get_paths") as mock_get_paths:
+            mock_get_paths.return_value = mock_paths
+            files = _resolve_code_files(temp_project_path, 26, 30)
 
         # Should be limited by 100KB max
         total_size = sum(f[0].stat().st_size for f in files)
@@ -598,34 +623,49 @@ class TestCacheOperations:
 class TestFindStoryFile:
     """Tests for _find_story_file function."""
 
-    def test_find_existing_story(self, temp_project_path):
+    def test_find_existing_story(self, temp_project_path, mock_paths):
         """Test finding an existing story file."""
-        stories_dir = temp_project_path / "_bmad-output" / "implementation-artifacts" / "stories"
+        stories_dir = mock_paths.stories_dir
         stories_dir.mkdir(parents=True, exist_ok=True)
         story_file = stories_dir / "26-10-test-story.md"
         story_file.write_text("# Test Story")
 
-        found = _find_story_file(temp_project_path, 26, 10)
+        with patch("bmad_assist.core.paths.get_paths") as mock_get_paths:
+            mock_get_paths.return_value = mock_paths
+            found = _find_story_file(temp_project_path, 26, 10)
 
         assert found is not None
         assert found.name == "26-10-test-story.md"
 
-    def test_story_not_found(self, temp_project_path):
+    def test_story_not_found(self, temp_project_path, mock_paths):
         """Test when story file doesn't exist."""
-        found = _find_story_file(temp_project_path, 99, 99)
+        # Ensure stories_dir exists but is empty
+        mock_paths.stories_dir.mkdir(parents=True, exist_ok=True)
+        with patch("bmad_assist.core.paths.get_paths") as mock_get_paths:
+            mock_get_paths.return_value = mock_paths
+            found = _find_story_file(temp_project_path, 99, 99)
         assert found is None
 
-    def test_find_with_string_epic(self, temp_project_path):
+    def test_find_with_string_epic(self, temp_project_path, mock_paths):
         """Test finding story with string epic ID."""
-        stories_dir = temp_project_path / "_bmad-output" / "implementation-artifacts" / "stories"
+        stories_dir = mock_paths.stories_dir
         stories_dir.mkdir(parents=True, exist_ok=True)
         story_file = stories_dir / "testarch-1-config.md"
         story_file.write_text("# Test Story")
 
-        found = _find_story_file(temp_project_path, "testarch", 1)
+        with patch("bmad_assist.core.paths.get_paths") as mock_get_paths:
+            mock_get_paths.return_value = mock_paths
+            found = _find_story_file(temp_project_path, "testarch", 1)
 
         assert found is not None
         assert "testarch" in found.name
+
+    def test_paths_not_initialized(self, temp_project_path):
+        """Test behavior when paths are not initialized."""
+        with patch("bmad_assist.core.paths.get_paths") as mock_get_paths:
+            mock_get_paths.side_effect = RuntimeError("Paths not initialized")
+            found = _find_story_file(temp_project_path, 26, 10)
+        assert found is None
 
 
 # =============================================================================
@@ -784,9 +824,9 @@ class TestEdgeCases:
             assert call_kwargs["context"].epic_num == "testarch"
             assert call_kwargs["context"].story_num == "A"
 
-    def test_file_list_with_backticks(self, temp_project_path):
+    def test_file_list_with_backticks(self, temp_project_path, mock_paths):
         """Test parsing File List with backtick formatting."""
-        stories_dir = temp_project_path / "_bmad-output" / "implementation-artifacts" / "stories"
+        stories_dir = mock_paths.stories_dir
         stories_dir.mkdir(parents=True, exist_ok=True)
         story_file = stories_dir / "26-25-test.md"
         story_file.write_text("""# Story
@@ -802,7 +842,9 @@ class TestEdgeCases:
         (src_dir / "file1.py").write_text("# file1")
         (src_dir / "file2.py").write_text("# file2")
 
-        files = _resolve_code_files(temp_project_path, 26, 25)
+        with patch("bmad_assist.core.paths.get_paths") as mock_get_paths:
+            mock_get_paths.return_value = mock_paths
+            files = _resolve_code_files(temp_project_path, 26, 25)
 
         assert len(files) == 2
 

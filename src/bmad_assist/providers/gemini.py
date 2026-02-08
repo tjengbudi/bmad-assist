@@ -43,6 +43,7 @@ from bmad_assist.providers.base import (
     ProviderResult,
     extract_tool_details,
     format_tag,
+    is_full_stream,
     should_print_progress,
     validate_settings_file,
     write_progress,
@@ -223,6 +224,7 @@ class GeminiProvider(BaseProvider):
         display_model: str | None = None,
         thinking: bool | None = None,
         cancel_token: threading.Event | None = None,
+        reasoning_effort: str | None = None,
     ) -> ProviderResult:
         """Execute Gemini CLI with the given prompt using JSON streaming.
 
@@ -468,11 +470,14 @@ class GeminiProvider(BaseProvider):
                                     if content:
                                         text_parts.append(content)
                                         if should_print_progress():
-                                            preview = content[:200]
-                                            if len(content) > 200:
-                                                preview += "..."
                                             tag = format_tag("ASSISTANT", color_idx)
-                                            write_progress(f"{tag} {preview}")
+                                            if is_full_stream():
+                                                write_progress(f"{tag} {content}")
+                                            else:
+                                                preview = content[:200]
+                                                if len(content) > 200:
+                                                    preview += "..."
+                                                write_progress(f"{tag} {preview}")
 
                             elif msg_type == "tool_use":
                                 tool_name = msg.get("tool_name", "?")
@@ -496,8 +501,6 @@ class GeminiProvider(BaseProvider):
                                     )
                                 if should_print_progress():
                                     tool_params = msg.get("parameters", {})
-                                    # Use shared extract_tool_details for consistent display
-                                    details = extract_tool_details(tool_name, tool_params)
                                     # Format like Claude: [TOOL Bash] command...
                                     display_name = tool_name
                                     # Normalize tool names for display
@@ -508,10 +511,18 @@ class GeminiProvider(BaseProvider):
                                     elif tool_name == "list_directory":
                                         display_name = "Glob"
                                     tag = format_tag(f"TOOL {display_name}", color_idx)
-                                    if details:
-                                        write_progress(f"{tag} {details}")
+                                    if is_full_stream():
+                                        import json as _json
+
+                                        write_progress(
+                                            f"{tag} {_json.dumps(tool_params, indent=2)}"
+                                        )
                                     else:
-                                        write_progress(f"{tag}")
+                                        details = extract_tool_details(tool_name, tool_params)
+                                        if details:
+                                            write_progress(f"{tag} {details}")
+                                        else:
+                                            write_progress(f"{tag}")
 
                             elif msg_type == "tool_result":
                                 # Skip tool_result display - too verbose
@@ -625,9 +636,9 @@ class GeminiProvider(BaseProvider):
                         partial_result=partial_result,
                     ) from None
 
-                # Wait for threads to finish
-                stdout_thread.join()
-                stderr_thread.join()
+                # Wait for threads to finish (timeout prevents hang if reader stuck)
+                stdout_thread.join(timeout=10)
+                stderr_thread.join(timeout=10)
 
             except FileNotFoundError as e:
                 logger.error("Gemini CLI not found in PATH")

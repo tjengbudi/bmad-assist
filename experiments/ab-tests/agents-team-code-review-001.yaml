@@ -1,0 +1,42 @@
+# A/B Test: Agents Team Code Review
+#
+# Tests whether adding "as an Agents Team" instruction to all code review
+# checks (step 4a-4i) improves the quality, breadth, or depth of findings.
+#
+# Selected stories have:
+# - Diverse findings across multiple categories (security, concurrency, architecture)
+# - Significant reviewer disagreement in original syntheses
+# - Multi-file implementations touching several concerns
+# - Substantial verified issues (not trivial reviews)
+#
+# Each story pins to its feat() commit — the implementation BEFORE code
+# review changes were applied. This ensures fresh, unbiased reviews.
+
+name: agents-team-cr-001
+fixture: webhook-relay-010
+analysis: true    # <-- enables LLM analysis
+stories:
+  - id: "2.3"   # Create Transformation Pipeline — validation ordering, concurrency, factory patterns
+    ref: b58faf3  # feat(story-2.3): implement story
+  - id: "3.4"   # Implement Fan-Out to Multiple Destinations — race conditions, goroutine panics, DoS
+    ref: 2873bb0  # feat(story-3.4): implement story
+  # - id: "3.5"   # Add Destination Health Tracking — RWMutex misuse, metrics cardinality, sliding window
+  #   ref: d2b1fba  # feat(story-3.5): implement story
+  # - id: "4.3"   # Add Dead Letter Queue Storage — DB atomicity, coordinator pattern, state machine
+  #   ref: b272351  # feat(story-4.3): implement story
+  # - id: "5.1"   # Create Route Management Endpoints — data loss bugs, API security, partial updates
+  #   ref: 6ec1c6b  # feat(story-5.1): implement story
+phases:
+  - code-review
+  - code-review-synthesis
+variant_a:
+  label: baseline
+  config: opus-haiku-gemini-glm
+  patch_set: baseline
+  workflow_set: baseline
+variant_b:
+  label: agents-team
+  config: opus-haiku-gemini-glm
+  patch_set: baseline
+  workflow_set: code-review-test-001
+scorecard: false

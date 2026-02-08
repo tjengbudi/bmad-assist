@@ -310,9 +310,6 @@ def _extract_essential_metrics(record: dict[str, Any]) -> dict[str, Any]:
     evaluator = record.get("evaluator", {})
     execution = record.get("execution", {})
     findings = record.get("findings") or {}
-    quality = record.get("quality") or {}
-    consensus = record.get("consensus") or {}
-
     result: dict[str, Any] = {
         "role": evaluator.get("role", "unknown"),
         "role_id": evaluator.get("role_id"),
@@ -327,24 +324,6 @@ def _extract_essential_metrics(record: dict[str, Any]) -> dict[str, Any]:
         result["findings"] = {
             "total": findings.get("total_count", 0),
             "by_sev": findings.get("by_severity", {}),
-        }
-
-    if quality:
-        result["quality"] = {
-            "actionable": quality.get("actionable_ratio"),
-            "specificity": quality.get("specificity_score"),
-            "evidence": quality.get("evidence_quality"),
-            "consistency": quality.get("internal_consistency"),
-        }
-        result["quality"] = {k: v for k, v in result["quality"].items() if v is not None}
-
-    if consensus:
-        result["consensus"] = {
-            "agreed": consensus.get("agreed_findings", 0),
-            "unique": consensus.get("unique_findings", 0),
-            "disputed": consensus.get("disputed_findings", 0),
-            "agreement": consensus.get("agreement_score"),
-            "fp": consensus.get("false_positive_count", 0),
         }
 
     return result

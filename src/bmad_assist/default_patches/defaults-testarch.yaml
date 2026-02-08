@@ -1,0 +1,106 @@
+# defaults-testarch.yaml - Shared post-processing rules for TEA workflows
+# These rules are automatically merged when compiling any testarch-* workflow
+#
+# Merge order (lowest to highest priority):
+#   1. defaults.yaml (global base)
+#   2. defaults-testarch.yaml (TEA overlay - this file)
+#   3. testarch-{workflow}.patch.yaml (workflow-specific)
+#
+# Rules are applied after LLM transforms.
+# See defaults.yaml for base rules that apply to all workflows.
+
+post_process:
+  # === TEA-specific path cleanup ===
+  # NOTE: {installed_path} references are cleaned up at the END of this file
+  # via specific patterns (instructions, template, validation) + catch-all.
+  # Order matters: legacy path fixes come before {installed_path} removal.
+
+  # === Knowledge fragment cleanup ===
+  # Clean up [Source: ...] reference markers from embedded knowledge
+  - pattern: '\[Source:\s*[^\]]+\]'
+    replacement: ""
+    flags: "IGNORECASE"
+
+  # Remove duplicate knowledge fragment markers (keep first occurrence)
+  # Pattern: Two consecutive KNOWLEDGE markers with same name
+  - pattern: '(<!-- KNOWLEDGE: ([^>]+) -->)[\s\S]*?\1'
+    replacement: '\1'
+    flags: "DOTALL"
+
+  # === Path normalization ===
+  # Remove {project-root} from error messages (use relative paths)
+  - pattern: '\{project-root\}/'
+    replacement: ""
+    flags: ""
+
+  # Normalize line endings to LF (remove \r)
+  - pattern: '\r\n'
+    replacement: '\n'
+    flags: ""
+  - pattern: '\r'
+    replacement: '\n'
+    flags: ""
+
+  # === TEA variable placeholder cleanup ===
+  # Remove unresolved TEA placeholders with warning markers
+  - pattern: '\{knowledgeIndex\}'
+    replacement: "<!-- WARNING: knowledgeIndex not resolved -->"
+    flags: ""
+
+  - pattern: '\{tea_use_playwright_utils\}'
+    replacement: "<!-- WARNING: tea_use_playwright_utils not resolved -->"
+    flags: ""
+
+  - pattern: '\{tea_use_mcp_enhancements\}'
+    replacement: "<!-- WARNING: tea_use_mcp_enhancements not resolved -->"
+    flags: ""
+
+  # === Step file reference cleanup ===
+  # Clean up step file navigation markers that are already resolved
+  - pattern: '\{nextStepFile\}'
+    replacement: ""
+    flags: ""
+
+  # === Context cleanup ===
+  # Remove empty context file references
+  - pattern: '<file[^>]*>[\s]*</file>'
+    replacement: ""
+    flags: "DOTALL"
+
+  # Remove empty file-index entries
+  - pattern: '<entry[^>]*path=""[^>]*/>'
+    replacement: ""
+    flags: ""
+
+  # === TEA-specific path cleanup (MUST come after other rules) ===
+  # Fix legacy _bmad/tea/ path references → _bmad/bmm/workflows/testarch/
+  # (workflow.yaml may reference old location)
+  - pattern: '_bmad/tea/workflows/testarch/'
+    replacement: "_bmad/bmm/workflows/testarch/"
+    flags: ""
+
+  # Also handle config path: _bmad/tea/config.yaml → _bmad/bmm/config.yaml
+  - pattern: '_bmad/tea/config\.yaml'
+    replacement: "_bmad/bmm/config.yaml"
+    flags: ""
+
+  # TEA uses .md instructions, not .xml
+  - pattern: '^instructions:\s*"\{installed_path\}/instructions\.md"\s*$'
+    replacement: "# instructions: embedded below"
+    flags: "MULTILINE"
+
+  # TEA uses different template names (test-design-*.md, etc.)
+  - pattern: '^template:\s*"\{installed_path\}/[^"]+"\s*$'
+    replacement: "# template: embedded in <output-template>"
+    flags: "MULTILINE"
+
+  # TEA validation/checklist path
+  - pattern: '^validation:\s*"\{installed_path\}/[^"]+"\s*$'
+    replacement: "# validation: checklist embedded or separate workflow"
+    flags: "MULTILINE"
+
+  # Catch-all: replace any remaining {installed_path} references
+  # This MUST be last - handles edge cases missed by specific patterns
+  - pattern: '\{installed_path\}'
+    replacement: "(embedded above)"
+    flags: ""

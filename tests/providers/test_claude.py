@@ -21,6 +21,7 @@ Tests cover:
 """
 
 from pathlib import Path
+from subprocess import TimeoutExpired
 from unittest.mock import MagicMock, patch
 
 import pytest
@@ -120,10 +121,12 @@ def create_mock_process(
     mock_process.stdin.write = MagicMock()
     mock_process.stdin.close = MagicMock()
 
-    # Mock poll() for the polling loop
+    # Mock poll() and wait() for the process loop
     if never_finish:
         # Always return None (process never finishes - for timeout tests)
         mock_process.poll.return_value = None
+        # wait() raises TimeoutExpired for providers using wait()
+        mock_process.wait.side_effect = TimeoutExpired(cmd=["mock"], timeout=5)
     else:
         # Return None poll_returns_none_count times, then returncode
         poll_call_count = [0]
@@ -335,15 +338,15 @@ class TestClaudeSubprocessProviderInvoke:
         call_kwargs = mock_successful_popen.call_args[1]
         assert call_kwargs["text"] is True
 
-    def test_invoke_polls_process(
+    def test_invoke_waits_for_process(
         self, provider: ClaudeSubprocessProvider, mock_successful_popen: MagicMock
     ) -> None:
-        """Test AC5: invoke() uses poll() loop to wait for process."""
+        """Test AC5: invoke() uses wait() to wait for process completion."""
         provider.invoke("Hello", timeout=60)
 
         mock_process = mock_successful_popen.return_value
-        # poll() is called at least once to check if process finished
-        assert mock_process.poll.call_count >= 1
+        # wait() is called to check if process finished
+        assert mock_process.wait.called
 
     def test_invoke_uses_default_timeout_implicitly(
         self, provider: ClaudeSubprocessProvider, mock_successful_popen: MagicMock

@@ -673,11 +673,32 @@ def _run_loop_body(
     # Epic setup: run before first story if not already complete
     # Per ADR-007: This also handles resume-after-setup-crash by restarting all setup phases
     if not state.epic_setup_complete and loop_config.epic_setup:
+        # Save the current phase before setup — on resume, state may have a mid-story phase
+        # (e.g., dev_story) that should be preserved after setup completes.
+        saved_phase = state.current_phase
         logger.info("Running epic setup phases for epic %s", state.current_epic)
         state, setup_success = _execute_epic_setup(state, state_path, project_path)
         if not setup_success:
             logger.error("Epic setup failed, halting loop")
             return LoopExitReason.GUARDIAN_HALT
+
+        # If resuming mid-story (not fresh start) and setup re-ran, restore the original
+        # phase to prevent restarting from create_story. This handles the case where
+        # epic_setup_complete was lost (e.g., due to hard kill before fsync).
+        if not is_fresh_start and saved_phase is not None:
+            story_phase_set = {Phase(p) for p in loop_config.story}
+            if saved_phase in story_phase_set and saved_phase != state.current_phase:
+                logger.info(
+                    "Restoring phase %s after epic setup re-run (resume case)",
+                    saved_phase.name,
+                )
+                state = state.model_copy(
+                    update={
+                        "current_phase": saved_phase,
+                        "updated_at": datetime.now(UTC).replace(tzinfo=None),
+                    }
+                )
+                save_state(state, state_path)
 
     # Main loop - runs until project complete or guardian halt
     while True:

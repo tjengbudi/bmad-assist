@@ -51,9 +51,14 @@ from bmad_assist.core.config.models.providers import (
     MultiProviderConfig,
     get_phase_provider_config,
 )
-from bmad_assist.core.exceptions import BmadAssistError
+from bmad_assist.core.exceptions import BmadAssistError, CompilerError
 from bmad_assist.core.extraction import CODE_REVIEW_MARKERS, extract_report
 from bmad_assist.core.io import get_original_cwd, save_prompt
+from bmad_assist.core.loop.dashboard_events import (
+    emit_security_review_completed,
+    emit_security_review_failed,
+    emit_security_review_started,
+)
 from bmad_assist.core.paths import get_paths
 from bmad_assist.core.types import EpicId
 from bmad_assist.deep_verify.core.types import DeepVerifyValidationResult
@@ -64,6 +69,9 @@ from bmad_assist.deep_verify.integration import (
 )
 from bmad_assist.providers import get_provider
 from bmad_assist.providers.base import BaseProvider
+from bmad_assist.security.agent import run_security_review
+from bmad_assist.security.integration import save_security_findings_for_synthesis
+from bmad_assist.security.report import SecurityReport
 from bmad_assist.validation.anonymizer import (
     AnonymizedValidation,
     ValidationOutput,
@@ -288,6 +296,7 @@ async def _invoke_reviewer(
     display_model: str | None = None,
     provider_name: str | None = None,
     thinking: bool | None = None,
+    reasoning_effort: str | None = None,
 ) -> tuple[str, ValidationOutput | None, DeterministicMetrics | None, str | None]:
     """Invoke a single reviewer using asyncio.to_thread.
 
@@ -310,6 +319,7 @@ async def _invoke_reviewer(
         cwd: Working directory for the provider. Used to allow reviewers to
             access files in the target project directory.
         display_model: Human-readable model name for progress output.
+        reasoning_effort: Reasoning effort level for supported providers (codex).
 
     Returns:
         Tuple of (reviewer_id, ValidationOutput or None, DeterministicMetrics or None,
@@ -332,6 +342,7 @@ async def _invoke_reviewer(
                 cwd=cwd,
                 display_model=display_model,
                 thinking=thinking,
+                reasoning_effort=reasoning_effort,
             ),
             timeout=timeout,
         )
@@ -509,6 +520,69 @@ def _resolve_story_file(
     return matches[0] if matches else None
 
 
+def _aggregate_dv_results(
+    dv_results: list[Any],
+    dv_tasks_info: list[tuple[Any, Path, str]],
+) -> DeepVerifyValidationResult | None:
+    """Aggregate per-file DV results into a single combined result.
+
+    Uses the same worst-verdict logic as load_dv_findings_from_cache()
+    but operates on in-memory results without disk I/O.
+
+    Args:
+        dv_results: Raw results from asyncio.gather (may include exceptions).
+        dv_tasks_info: Task info tuples (task, file_path, language).
+
+    Returns:
+        Aggregated DeepVerifyValidationResult if any valid results, None otherwise.
+
+    """
+    from bmad_assist.deep_verify.core.types import MethodId, VerdictDecision
+
+    all_findings: list[Any] = []
+    all_domains: list[Any] = []
+    all_methods: set[str] = set()
+    total_duration = 0
+    worst_verdict: VerdictDecision | None = None
+    min_score = 100.0
+
+    for idx, dv_result in enumerate(dv_results):
+        if isinstance(dv_result, Exception):
+            continue
+        if not isinstance(dv_result, DeepVerifyValidationResult):
+            continue
+
+        all_findings.extend(dv_result.findings)
+        all_domains.extend(dv_result.domains_detected)
+        all_methods.update(str(m) for m in dv_result.methods_executed)
+        total_duration += dv_result.duration_ms
+        min_score = min(min_score, dv_result.score)
+
+        # Track worst verdict (REJECT > UNCERTAIN > ACCEPT)
+        if worst_verdict is None:
+            worst_verdict = dv_result.verdict
+        elif dv_result.verdict == VerdictDecision.REJECT:
+            worst_verdict = VerdictDecision.REJECT
+        elif (
+            dv_result.verdict == VerdictDecision.UNCERTAIN
+            and worst_verdict == VerdictDecision.ACCEPT
+        ):
+            worst_verdict = VerdictDecision.UNCERTAIN
+
+    if worst_verdict is None:
+        return None
+
+    return DeepVerifyValidationResult(
+        verdict=worst_verdict,
+        score=min_score,
+        findings=all_findings,
+        domains_detected=all_domains,
+        methods_executed=[MethodId(m) for m in all_methods],
+        duration_ms=total_duration,
+        error=None,
+    )
+
+
 async def run_code_review_phase(
     config: Config,
     project_path: Path,
@@ -628,6 +702,7 @@ async def run_code_review_phase(
             display_model=multi_config.display_model,
             provider_name=multi_config.provider,
             thinking=multi_config.thinking,
+            reasoning_effort=multi_config.reasoning_effort,
         )
         task = asyncio.create_task(delayed_invoke(delay, coro))
         tasks.append(task)
@@ -663,16 +738,59 @@ async def run_code_review_phase(
     else:
         logger.debug("phase_models.code_review defined - master NOT auto-added")
 
+    # [NEW] Add Security Agent task (parallel with reviewers and DV)
+    security_task: asyncio.Task[SecurityReport] | None = None
+    security_enabled = config.security_agent.enabled
+    if security_enabled:
+        try:
+            logger.info("Security agent enabled - compiling security-review workflow")
+            security_context = CompilerContext(
+                project_root=project_path,
+                output_folder=get_paths().output_folder,
+                cwd=get_original_cwd(),
+            )
+            compiled_security = compile_workflow("security-review", security_context)
+            security_prompt = compiled_security.context
+            security_languages = compiled_security.variables.get(
+                "detected_languages_list", []
+            )
+            security_patterns_count = compiled_security.variables.get(
+                "patterns_loaded_count", 0
+            )
+            security_timeout = get_phase_timeout(config, "security_review")
+            security_coro = run_security_review(
+                config=config,
+                project_path=project_path,
+                compiled_prompt=security_prompt,
+                timeout=security_timeout,
+                languages=security_languages,
+                patterns_loaded=security_patterns_count,
+            )
+            security_task = asyncio.create_task(security_coro)
+            logger.debug("Security agent task created (timeout=%ds)", security_timeout)
+            emit_security_review_started(run_id="", sequence_id=0)
+        except (CompilerError, BmadAssistError) as e:
+            logger.warning("Failed to compile security-review workflow: %s", e)
+            security_task = None
+    else:
+        logger.debug("Security agent disabled")
+
     logger.info("Invoking %d reviewers in parallel", len(tasks))
 
-    # Step 3: Run all reviewers (and DV tasks) in parallel
-    # Combine regular reviewer tasks with DV tasks
-    all_tasks = tasks + [t[0] for t in dv_tasks_info]
+    # Step 3: Run all reviewers (and DV + security tasks) in parallel
+    # Combine regular reviewer tasks with DV tasks and optional security task
+    all_tasks: list[asyncio.Task[Any]] = tasks + [t[0] for t in dv_tasks_info]
+    if security_task is not None:
+        all_tasks.append(security_task)
     results = await asyncio.gather(*all_tasks, return_exceptions=True)
 
-    # Split results: regular reviewers vs DV
-    reviewer_results: list[_ReviewerResult | BaseException] = results[: len(tasks)]  # type: ignore[assignment]
-    dv_results = results[len(tasks) :]
+    # Split results: regular reviewers vs DV vs security
+    reviewer_results: list[_ReviewerResult | BaseException] = results[: len(tasks)]
+    dv_end_idx = len(tasks) + len(dv_tasks_info)
+    dv_results = results[len(tasks):dv_end_idx]
+    security_result: SecurityReport | BaseException | None = (
+        results[dv_end_idx] if security_task is not None else None
+    )
 
     # Step 4: Collect successful results (regular reviewers)
     successful_outputs: list[ValidationOutput] = []
@@ -725,6 +843,72 @@ async def run_code_review_phase(
                 logger.debug("Saved DV findings for %s", file_path)
             except OSError as e:
                 logger.warning("Failed to save DV findings for %s: %s", file_path, e)
+
+    # Save archival DV report to deep-verify/ (aggregated across all files)
+    if dv_findings_saved > 0:
+        try:
+            from bmad_assist.deep_verify.integration.reports import save_deep_verify_report
+
+            aggregated = _aggregate_dv_results(dv_results, dv_tasks_info)
+            if aggregated is not None:
+                dv_dir = get_paths().deep_verify_dir
+                save_deep_verify_report(
+                    result=aggregated,
+                    epic=epic_num,
+                    story=story_num,
+                    output_dir=dv_dir,
+                    phase_type="code-review",
+                )
+        except Exception as e:
+            logger.warning("Failed to save archival DV report: %s", e)
+
+    # Process security agent result and save to cache (using session_id from mapping)
+    if security_result is not None:
+        if isinstance(security_result, BaseException):
+            logger.warning("Security agent task failed: %s", security_result)
+            emit_security_review_failed(run_id="", sequence_id=0, error=str(security_result))
+        elif isinstance(security_result, SecurityReport):
+            # Save to cache for synthesis (required)
+            try:
+                save_security_findings_for_synthesis(
+                    report=security_result,
+                    project_path=project_path,
+                    session_id=mapping.session_id,
+                )
+                logger.info(
+                    "Saved security findings for synthesis: %d findings",
+                    len(security_result.findings),
+                )
+            except OSError as e:
+                logger.warning("Failed to save security findings to cache: %s", e)
+
+            # Save archival MD to security-reports/ (always, even with zero findings)
+            try:
+                paths_obj = get_paths()
+                sec_dir = paths_obj.security_reports_dir
+                sec_dir.mkdir(parents=True, exist_ok=True)
+                ts = run_timestamp.strftime("%Y%m%d-%H%M%S")
+                report_path = sec_dir / f"security-{epic_num}-{story_num}-{ts}.md"
+                report_path.write_text(security_result.to_markdown(), encoding="utf-8")
+                logger.debug("Saved archival security report: %s", report_path.name)
+            except OSError as e:
+                logger.warning("Failed to save archival security report: %s", e)
+
+            if security_result.timed_out:
+                logger.warning("Security review timed out — synthesis will include timeout banner")
+
+            # Emit SSE completion event with severity summary
+            severity_summary: dict[str, int] = {}
+            for f in security_result.findings:
+                sev = f.severity.upper() if f.severity else "UNKNOWN"
+                severity_summary[sev] = severity_summary.get(sev, 0) + 1
+            emit_security_review_completed(
+                run_id="",
+                sequence_id=0,
+                finding_count=len(security_result.findings),
+                severity_summary=severity_summary,
+                timed_out=security_result.timed_out,
+            )
 
     # Step 7: Save individual review reports with index-based role_id
     # Role IDs: a, b, c... (matching benchmark records from Story 22.6)

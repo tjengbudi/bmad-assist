@@ -44,7 +44,7 @@ class ProjectPaths:
     DEFAULT_OUTPUT_FOLDER = "{project-root}/_bmad-output"
     DEFAULT_PLANNING_ARTIFACTS = "{project-root}/_bmad-output/planning-artifacts"
     DEFAULT_IMPLEMENTATION_ARTIFACTS = "{project-root}/_bmad-output/implementation-artifacts"
-    DEFAULT_PROJECT_KNOWLEDGE = "{project-root}/docs"
+    DOCS_FALLBACK = "{project-root}/docs"
 
     def __init__(self, project_root: Path, config: dict[str, Any] | None = None):
         """Initialize ProjectPaths with project root and optional config.
@@ -137,8 +137,23 @@ class ProjectPaths:
 
     @cached_property
     def project_knowledge(self) -> Path:
-        """Project knowledge/documentation folder (docs/)."""
-        return self._get_config_path("project_knowledge", self.DEFAULT_PROJECT_KNOWLEDGE)
+        """Project knowledge/documentation folder.
+
+        Resolution: explicit config → planning_artifacts (if exists) → docs/ fallback.
+        File discovery functions add docs/ as additional fallback.
+        """
+        configured = self._config.get("project_knowledge")
+        if configured is not None:
+            return self._resolve_path(configured)
+        # Default: planning_artifacts if it exists, else docs/ fallback
+        if self.planning_artifacts.exists():
+            return self.planning_artifacts
+        return self.project_docs_fallback
+
+    @cached_property
+    def project_docs_fallback(self) -> Path:
+        """Legacy docs/ folder, used as fallback for file discovery."""
+        return self._resolve_path(self.DOCS_FALLBACK)
 
     # =========================================================================
     # Planning Artifacts (pre-implementation)
@@ -150,33 +165,49 @@ class ProjectPaths:
 
         Resolution order:
         1. Config override: epics (e.g., "docs/development_process/epics")
-        2. Standard sharded: project_knowledge/epics/ (e.g., docs/epics/)
-        3. Auto-discovery: search project_knowledge (max 2 levels) for "epics" dir
-        4. Fallback: planning_artifacts/epics/ (generated)
+        2. Standard sharded: project_knowledge/epics/
+        3. docs/ fallback: project_docs_fallback/epics/
+        4. Auto-discovery: search project_knowledge + docs/ for "epics" dir
+        5. Fallback: planning_artifacts/epics/ (generated)
         """
         # 1. Check for explicit config override
         if "epics" in self._config:
             return self._resolve_path(self._config["epics"])
 
-        # 2. Prefer sharded epics in project_knowledge (docs/epics/)
-        sharded_dir = self.project_knowledge / "epics"
-        if sharded_dir.exists() and sharded_dir.is_dir():
-            return sharded_dir
+        # 2-3. Check project_knowledge then docs/ fallback for epics/
+        for base in self._knowledge_search_dirs():
+            sharded_dir = base / "epics"
+            if sharded_dir.exists() and sharded_dir.is_dir():
+                return sharded_dir
 
-        # 3. Auto-discovery: search max 2 levels deep for "epics" directory
-        found = self._find_epics_dir(self.project_knowledge, max_depth=2)
-        if found:
-            # Warn about non-standard location
-            relative = found.relative_to(self.project_knowledge)
-            logger.warning(
-                "Epics directory found at non-standard location: %s "
-                "(expected: epics/). Consider moving or setting bmad_paths.epics in config.",
-                relative,
-            )
-            return found
+        # 4. Auto-discovery: search max 2 levels deep for "epics" directory
+        for base in self._knowledge_search_dirs():
+            found = self._find_epics_dir(base, max_depth=2)
+            if found:
+                try:
+                    relative = found.relative_to(base)
+                except ValueError:
+                    relative = found
+                logger.warning(
+                    "Epics directory found at non-standard location: %s "
+                    "(expected: epics/). Consider moving or setting bmad_paths.epics in config.",
+                    relative,
+                )
+                return found
 
-        # 4. Fallback to planning_artifacts (generated epics)
+        # 5. Fallback to planning_artifacts (generated epics)
         return self.planning_artifacts / "epics"
+
+    def _knowledge_search_dirs(self) -> list[Path]:
+        """Return deduplicated list of dirs to search for project knowledge.
+
+        Returns project_knowledge followed by docs/ fallback (if different).
+        """
+        dirs: list[Path] = [self.project_knowledge]
+        fallback = self.project_docs_fallback
+        if fallback.resolve() != self.project_knowledge.resolve():
+            dirs.append(fallback)
+        return dirs
 
     def _find_epics_dir(self, base: Path, max_depth: int) -> Path | None:
         """Find 'epics' directory within base, excluding archive dirs.
@@ -251,13 +282,18 @@ class ProjectPaths:
         return self.implementation_artifacts / "deep-verify"
 
     @cached_property
+    def security_reports_dir(self) -> Path:
+        """Directory for Security Review Agent reports."""
+        return self.implementation_artifacts / "security-reports"
+
+    @cached_property
     def retrospectives_dir(self) -> Path:
         """Directory for epic retrospective reports."""
         return self.implementation_artifacts / "retrospectives"
 
     @cached_property
     def legacy_sprint_artifacts(self) -> Path:
-        """Legacy sprint artifacts directory (docs/sprint-artifacts/)."""
+        """Legacy sprint artifacts directory (project_knowledge/sprint-artifacts/)."""
         return self.project_knowledge / "sprint-artifacts"
 
     # =========================================================================
@@ -322,6 +358,8 @@ class ProjectPaths:
             self.sprint_status_file,  # New: implementation-artifacts/
             self.legacy_sprint_artifacts / "sprint-status.yaml",  # Legacy
             self.project_knowledge / "sprint-status.yaml",  # Legacy (direct)
+            self.project_docs_fallback / "sprint-artifacts" / "sprint-status.yaml",  # docs/ fallback
+            self.project_docs_fallback / "sprint-status.yaml",  # docs/ fallback (direct)
         ]
         # Deduplicate while preserving order, return resolved paths for consistency
         seen: set[Path] = set()
@@ -423,6 +461,7 @@ class ProjectPaths:
             self.code_reviews_dir,
             self.benchmarks_dir,
             self.deep_verify_dir,
+            self.security_reports_dir,
             self.retrospectives_dir,
             self.bmad_assist_dir,
             self.patches_dir,

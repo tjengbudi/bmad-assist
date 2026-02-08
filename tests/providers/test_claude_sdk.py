@@ -702,6 +702,107 @@ class TestDocstringsExist:
         assert ClaudeSDKProvider.supports_model.__doc__ is not None
 
 
+class TestDisableTools:
+    """Test disable_tools=True sets allowed_tools=[] for SDK."""
+
+    @pytest.fixture
+    def provider(self) -> ClaudeSDKProvider:
+        """Create ClaudeSDKProvider instance."""
+        return ClaudeSDKProvider()
+
+    @pytest.fixture
+    def mock_text_block(self) -> MagicMock:
+        """Create mock TextBlock."""
+        from claude_agent_sdk import TextBlock
+
+        return TextBlock(text="response")
+
+    @pytest.fixture
+    def mock_assistant_message(self, mock_text_block: MagicMock) -> MagicMock:
+        """Create mock AssistantMessage."""
+        from claude_agent_sdk import AssistantMessage
+
+        return AssistantMessage(content=[mock_text_block], model="sonnet")
+
+    @pytest.fixture
+    def mock_result_message(self) -> MagicMock:
+        """Create mock ResultMessage."""
+        from claude_agent_sdk import ResultMessage
+
+        return ResultMessage(
+            subtype="success",
+            duration_ms=1000,
+            duration_api_ms=900,
+            is_error=False,
+            num_turns=1,
+            session_id="test-session",
+            total_cost_usd=0.001,
+            usage={"input_tokens": 10, "output_tokens": 20},
+            result=None,
+        )
+
+    def test_disable_tools_passes_empty_allowed_tools(
+        self,
+        provider: ClaudeSDKProvider,
+        mock_assistant_message: MagicMock,
+        mock_result_message: MagicMock,
+    ) -> None:
+        """When disable_tools=True, allowed_tools=[] is passed to _invoke_async."""
+        messages = [mock_assistant_message, mock_result_message]
+
+        with (
+            patch("bmad_assist.providers.claude_sdk.query") as mock_query,
+            patch.object(provider, "_invoke_async", wraps=provider._invoke_async) as mock_invoke_async,
+        ):
+            mock_query.return_value = _mock_async_generator(messages)
+            provider.invoke("test prompt", model="sonnet", disable_tools=True)
+            # _invoke_async should be called with allowed_tools=[]
+            mock_invoke_async.assert_called_once()
+            call_args = mock_invoke_async.call_args
+            assert call_args[0][4] == []  # 5th positional arg = allowed_tools
+
+    def test_disable_tools_false_does_not_set_allowed_tools(
+        self,
+        provider: ClaudeSDKProvider,
+        mock_assistant_message: MagicMock,
+        mock_result_message: MagicMock,
+    ) -> None:
+        """When disable_tools=False, allowed_tools remains None (all tools)."""
+        messages = [mock_assistant_message, mock_result_message]
+
+        with (
+            patch("bmad_assist.providers.claude_sdk.query") as mock_query,
+            patch.object(provider, "_invoke_async", wraps=provider._invoke_async) as mock_invoke_async,
+        ):
+            mock_query.return_value = _mock_async_generator(messages)
+            provider.invoke("test prompt", model="sonnet", disable_tools=False)
+            mock_invoke_async.assert_called_once()
+            call_args = mock_invoke_async.call_args
+            assert call_args[0][4] is None  # allowed_tools stays None
+
+    def test_disable_tools_with_explicit_allowed_tools_keeps_them(
+        self,
+        provider: ClaudeSDKProvider,
+        mock_assistant_message: MagicMock,
+        mock_result_message: MagicMock,
+    ) -> None:
+        """When disable_tools=True but allowed_tools is already set, keep explicit list."""
+        messages = [mock_assistant_message, mock_result_message]
+
+        with (
+            patch("bmad_assist.providers.claude_sdk.query") as mock_query,
+            patch.object(provider, "_invoke_async", wraps=provider._invoke_async) as mock_invoke_async,
+        ):
+            mock_query.return_value = _mock_async_generator(messages)
+            provider.invoke(
+                "test prompt", model="sonnet", disable_tools=True,
+                allowed_tools=["Read", "Glob"],
+            )
+            mock_invoke_async.assert_called_once()
+            call_args = mock_invoke_async.call_args
+            assert call_args[0][4] == ["Read", "Glob"]
+
+
 class TestConstants:
     """Test module constants."""
 

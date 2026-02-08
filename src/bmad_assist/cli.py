@@ -88,7 +88,7 @@ def _load_epic_data(
     from bmad_assist.core.paths import get_paths
 
     paths = get_paths()
-    # Use project_knowledge directly - it handles both sharded (epics/) and monolithic (epics.md)
+    # project_knowledge resolves to planning_artifacts or docs/ fallback
     bmad_path = paths.project_knowledge
 
     logger.debug("Loading BMAD project state from: %s", bmad_path)
@@ -247,7 +247,7 @@ def run(
         False,
         "--verbose",
         "-v",
-        help="Enable debug output (show detailed logging)",
+        help="Show INFO-level logs (phase progress, provider status)",
     ),
     quiet: bool = typer.Option(
         False,
@@ -280,6 +280,11 @@ def run(
         False,
         "--debug-vars",
         help="Show resolved variables only (no LLM execution)",
+    ),
+    full_stream: bool = typer.Option(
+        False,
+        "--full-stream",
+        help="Show full untruncated LLM stream output (requires --debug)",
     ),
     disable_compiler: bool = typer.Option(
         False,
@@ -345,8 +350,15 @@ def run(
     # Process debug flags (--debug-links implies --debug)
     debug_jsonl = debug or debug_links
 
-    # Setup logging first (debug implies verbose for JSONL logging)
-    _setup_logging(verbose or debug_jsonl, quiet)
+    # Setup logging: --debug = DEBUG, --verbose = INFO, default = WARNING
+    _setup_logging(verbose, quiet, debug=debug_jsonl)
+
+    # Stream output: only with --debug (not --verbose)
+    from bmad_assist.providers.base import set_stream_mode
+
+    if full_stream and not debug_jsonl:
+        _warning("--full-stream has no effect without --debug")
+    set_stream_mode(enabled=debug_jsonl, full=full_stream)
 
     # Set non-interactive mode if -n flag is passed
     # This must be set early, before any interactive prompts can occur

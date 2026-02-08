@@ -26,6 +26,7 @@ def save_deep_verify_report(
     validations_dir: Path | None = None,
     *,
     output_dir: Path | None = None,
+    phase_type: str | None = None,
 ) -> Path:
     """Save Deep Verify findings as markdown report.
 
@@ -42,6 +43,8 @@ def save_deep_verify_report(
         story: Story number or name.
         validations_dir: DEPRECATED - use output_dir instead.
         output_dir: Directory to save the report (deep-verify/).
+        phase_type: Phase identifier (e.g. "story-validation", "code-review").
+            When set, included in filename and report metadata.
 
     Returns:
         Path to the saved report file.
@@ -52,6 +55,7 @@ def save_deep_verify_report(
         ...     epic=26,
         ...     story=16,
         ...     output_dir=Path("deep-verify"),
+        ...     phase_type="story-validation",
         ... )
         >>> print(f"Report saved to: {report_path}")
 
@@ -63,10 +67,13 @@ def save_deep_verify_report(
     target_dir.mkdir(parents=True, exist_ok=True)
 
     timestamp = datetime.now(UTC).strftime("%Y%m%d_%H%M%S")
-    filename = f"deep-verify-{epic}-{story}-{timestamp}.md"
+    if phase_type:
+        filename = f"deep-verify-{epic}-{story}-{phase_type}-{timestamp}.md"
+    else:
+        filename = f"deep-verify-{epic}-{story}-{timestamp}.md"
     report_path = target_dir / filename
 
-    content = _format_report_content(result, epic, story)
+    content = _format_report_content(result, epic, story, phase_type=phase_type)
 
     # Atomic write
     temp_path = report_path.with_suffix(".tmp")
@@ -85,6 +92,8 @@ def _format_report_content(
     result: DeepVerifyValidationResult,
     epic: int | str,
     story: int | str,
+    *,
+    phase_type: str | None = None,
 ) -> str:
     """Format the markdown report content.
 
@@ -92,6 +101,7 @@ def _format_report_content(
         result: DeepVerifyValidationResult.
         epic: Epic identifier.
         story: Story identifier.
+        phase_type: Phase identifier for metadata (e.g. "story-validation").
 
     Returns:
         Formatted markdown string.
@@ -115,6 +125,7 @@ def _format_report_content(
         "",
         f"- **Epic:** {epic}",
         f"- **Story:** {story}",
+        *([ f"- **Phase:** {phase_type}"] if phase_type else []),
         f"- **Generated:** {datetime.now(UTC).isoformat()}",
         "",
         "---",

@@ -38,6 +38,8 @@ from datetime import datetime
 from typing import TYPE_CHECKING, Any
 
 if TYPE_CHECKING:
+    from pathlib import Path
+
     from bmad_assist.deep_verify.config import DeepVerifyConfig
 
 from bmad_assist.core.exceptions import (
@@ -98,16 +100,22 @@ class LLMClient:
         self,
         config: DeepVerifyConfig,
         provider: BaseProvider,
+        settings_file: Path | None = None,
+        thinking: bool | None = None,
     ) -> None:
         """Initialize the LLM client.
 
         Args:
             config: DeepVerifyConfig with llm_config settings.
             provider: The underlying provider to wrap.
+            settings_file: Optional path to provider settings JSON file.
+            thinking: Optional thinking mode flag for supported providers.
 
         """
         self.config = config
         self.provider = provider
+        self._settings_file = settings_file
+        self._thinking = thinking
 
         # Get LLM config (handle both new and old config structures)
         llm_config = getattr(config, "llm_config", None)
@@ -311,14 +319,18 @@ class LLMClient:
         try:
             # Use asyncio.timeout() for Python 3.11+
             async with asyncio.timeout(timeout):
+                kwargs: dict[str, Any] = {
+                    "prompt": prompt,
+                    "model": model,
+                    "timeout": timeout,
+                }
+                if self._settings_file is not None:
+                    kwargs["settings_file"] = self._settings_file
+                if self._thinking is not None:
+                    kwargs["thinking"] = self._thinking
                 result = await loop.run_in_executor(
                     None,  # Default ThreadPoolExecutor
-                    functools.partial(
-                        self.provider.invoke,
-                        prompt=prompt,
-                        model=model,
-                        timeout=timeout,
-                    ),
+                    functools.partial(self.provider.invoke, **kwargs),
                 )
                 return result
         except TimeoutError as e:

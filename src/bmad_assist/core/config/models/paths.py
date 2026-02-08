@@ -102,8 +102,8 @@ class ProjectPathsConfig(BaseModel):
         description="Folder for implementation artifacts (validations, reviews, benchmarks)",
         json_schema_extra={"security": "dangerous"},
     )
-    project_knowledge: str = Field(
-        default="{project-root}/docs",
-        description="Folder for project documentation (PRD, architecture)",
+    project_knowledge: str | None = Field(
+        default=None,
+        description="Folder for project documentation (PRD, architecture). Defaults to planning_artifacts path, with docs/ as fallback.",
         json_schema_extra={"security": "dangerous"},
     )

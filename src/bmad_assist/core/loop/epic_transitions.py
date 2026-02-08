@@ -199,10 +199,19 @@ def advance_to_next_epic(
         raise StateError("Cannot advance epic: no current epic set")
 
     # Find the next incomplete epic (skip already completed ones)
-    candidate_epic = state.current_epic
-    while True:
+    next_epic: EpicId | None
+    if state.current_epic not in epic_list:
+        next_epic = epic_list[0]
+        logger.info(
+            "Current epic %s not in epic_list (likely done), advancing to %s",
+            state.current_epic,
+            next_epic,
+        )
+    else:
+        candidate_epic = state.current_epic
         next_epic = get_next_epic(candidate_epic, epic_list)
 
+    while True:
         if next_epic is None:
             logger.info("Epic %s is final epic in project", state.current_epic)
             return None
@@ -214,6 +223,7 @@ def advance_to_next_epic(
                 next_epic,
             )
             candidate_epic = next_epic
+            next_epic = get_next_epic(candidate_epic, epic_list)
             continue
 
         # Load stories for the next epic
@@ -227,6 +237,7 @@ def advance_to_next_epic(
                 next_epic,
             )
             candidate_epic = next_epic
+            next_epic = get_next_epic(candidate_epic, epic_list)
             continue
 
         # Check if ALL stories for this epic are already completed
@@ -250,6 +261,7 @@ def advance_to_next_epic(
                 )
                 # Continue searching for next epic with incomplete stories
                 candidate_epic = next_epic
+                next_epic = get_next_epic(candidate_epic, epic_list)
                 continue
 
             last_story = stories[-1]
@@ -371,11 +383,15 @@ def handle_epic_completion(
     # epic_list, the current epic's work is done - signal project completion.
     if state.current_epic not in epic_list:
         logger.info(
-            "Epic %s completed! All stories in this epic are done.",
+            "Epic %s completed (was not in epic_list, likely filtered as done).",
             state.current_epic,
         )
-        persist_epic_completion(state_with_completion, state_path)
-        return state_with_completion, True
+        if not epic_list:
+            logger.info("Project complete! No remaining epics with incomplete stories.")
+            persist_epic_completion(state_with_completion, state_path)
+            return state_with_completion, True
+
+        # If epic_list is NOT empty, proceed to advance_to_next_epic below
 
     # Step 3: Try to advance to next incomplete epic (normal flow)
     # advance_to_next_epic handles skipping already-completed epics

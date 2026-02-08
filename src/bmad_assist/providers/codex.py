@@ -4,6 +4,10 @@ This module implements the CodexProvider class that adapts Codex CLI
 for use within bmad-assist via subprocess invocation. Codex serves as
 a Multi LLM validator for story validation and code review phases.
 
+Uses platform_command module for prompts >=100KB to avoid ARG_MAX limits
+on POSIX systems. The prompt is passed as a positional argument to
+``codex exec``, which hits OS limits with large compiled BMAD prompts.
+
 ⚠️ SECURITY WARNING: When CodexProvider is used as a Multi-LLM validator,
 the orchestrator MUST ensure read-only behavior. The --full-auto flag
 grants file modification permissions, but Multi-LLM validators MUST NOT
@@ -36,11 +40,16 @@ from bmad_assist.core.exceptions import (
     ProviderExitCodeError,
     ProviderTimeoutError,
 )
+from bmad_assist.core.platform_command import (
+    build_cross_platform_command,
+    cleanup_temp_file,
+)
 from bmad_assist.providers.base import (
     BaseProvider,
     ExitStatus,
     ProviderResult,
     format_tag,
+    is_full_stream,
     should_print_progress,
     validate_settings_file,
     write_progress,
@@ -196,6 +205,7 @@ class CodexProvider(BaseProvider):
         display_model: str | None = None,
         thinking: bool | None = None,
         cancel_token: threading.Event | None = None,
+        reasoning_effort: str | None = None,
     ) -> ProviderResult:
         """Execute Codex CLI with the given prompt using JSON streaming.
 
@@ -231,6 +241,8 @@ class CodexProvider(BaseProvider):
             allowed_tools: List of allowed tools. When set, uses --sandbox read-only.
             no_cache: Disable caching (ignored - Codex CLI doesn't support).
             color_index: Color index for terminal output differentiation.
+            reasoning_effort: Reasoning effort level (minimal/low/medium/high/xhigh).
+                Passed to Codex CLI as -c model_reasoning_effort="VALUE".
 
         Returns:
             ProviderResult containing extracted text, stderr, exit code, and timing.
@@ -276,12 +288,21 @@ class CodexProvider(BaseProvider):
             "read-only" if use_sandbox else "none",
         )
 
+        # Validate reasoning_effort if provided
+        valid_reasoning = {"minimal", "low", "medium", "high", "xhigh"}
+        if reasoning_effort is not None and reasoning_effort not in valid_reasoning:
+            logger.warning(
+                "Invalid reasoning_effort '%s', ignoring (valid: %s)",
+                reasoning_effort,
+                ", ".join(sorted(valid_reasoning)),
+            )
+            reasoning_effort = None
+
         # Build command with --json for JSONL streaming
+        # Uses platform_command for large prompt handling (>=100KB temp file)
         if use_sandbox:
-            command: list[str] = [
-                "codex",
+            base_args = [
                 "exec",
-                prompt,
                 "--json",
                 "--sandbox",
                 "read-only",
@@ -289,15 +310,30 @@ class CodexProvider(BaseProvider):
                 effective_model,
             ]
         else:
-            command = [
-                "codex",
+            base_args = [
                 "exec",
-                prompt,
                 "--json",
                 "--full-auto",
                 "-m",
                 effective_model,
             ]
+
+        # Add reasoning effort config override if specified
+        if reasoning_effort is not None:
+            base_args.extend(["-c", f'model_reasoning_effort="{reasoning_effort}"'])
+
+        command, temp_file = build_cross_platform_command("codex", base_args, prompt)
+
+        # For ProviderResult, store original command structure (without shell wrapper)
+        original_command: tuple[str, ...] = (
+            "codex",
+            "exec",
+            prompt[:100] + "..." if len(prompt) > 100 else prompt,
+            "--json",
+            "--sandbox" if use_sandbox else "--full-auto",
+            "-m",
+            effective_model,
+        )
 
         if validated_settings is not None:
             logger.debug(
@@ -364,16 +400,25 @@ class CodexProvider(BaseProvider):
                                 if text:
                                     text_parts.append(text)
                                     if should_print_progress():
-                                        preview = text[:200]
-                                        if len(text) > 200:
-                                            preview += "..."
                                         tag = format_tag("MESSAGE", color_idx)
-                                        write_progress(f"{tag} {preview}")
+                                        if is_full_stream():
+                                            write_progress(f"{tag} {text}")
+                                        else:
+                                            preview = text[:200]
+                                            if len(text) > 200:
+                                                preview += "..."
+                                            write_progress(f"{tag} {preview}")
                             elif item_type == "command_execution":
                                 if should_print_progress():
                                     cmd = item.get("command", "?")
                                     tag = format_tag("CMD", color_idx)
-                                    write_progress(f"{tag} {cmd}")
+                                    if is_full_stream():
+                                        write_progress(f"{tag} {cmd}")
+                                    else:
+                                        cmd_preview = cmd[:60]
+                                        if len(cmd) > 60:
+                                            cmd_preview += "..."
+                                        write_progress(f"{tag} {cmd_preview}")
 
                         elif msg_type == "turn.completed":
                             if should_print_progress():
@@ -443,7 +488,7 @@ class CodexProvider(BaseProvider):
                     exit_code=-1,
                     duration_ms=duration_ms,
                     model=effective_model,
-                    command=tuple(command),
+                    command=original_command,
                 )
 
                 logger.warning(
@@ -461,15 +506,16 @@ class CodexProvider(BaseProvider):
                     partial_result=partial_result,
                 ) from None
 
-            # Wait for threads to finish
-            stdout_thread.join()
-            stderr_thread.join()
+            # Wait for threads to finish (timeout prevents hang if reader stuck)
+            stdout_thread.join(timeout=10)
+            stderr_thread.join(timeout=10)
 
         except FileNotFoundError as e:
             logger.error("Codex CLI not found in PATH")
             raise ProviderError("Codex CLI not found. Is 'codex' in PATH?") from e
         finally:
             debug_json_logger.close()
+            cleanup_temp_file(temp_file)
 
         duration_ms = int((time.perf_counter() - start_time) * 1000)
         stderr_content = "".join(stderr_chunks)
@@ -512,7 +558,7 @@ class CodexProvider(BaseProvider):
                 exit_code=returncode,
                 exit_status=exit_status,
                 stderr=stderr_content,
-                command=tuple(command),
+                command=original_command,
             )
 
         # Combine extracted text parts
@@ -534,7 +580,7 @@ class CodexProvider(BaseProvider):
             exit_code=returncode,
             duration_ms=duration_ms,
             model=effective_model,
-            command=tuple(command),
+            command=original_command,
             provider_session_id=provider_session_id,
         )
 

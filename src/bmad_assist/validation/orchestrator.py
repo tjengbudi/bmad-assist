@@ -290,6 +290,7 @@ async def _invoke_validator(
     cwd: Path | None = None,
     display_model: str | None = None,
     thinking: bool | None = None,
+    reasoning_effort: str | None = None,
 ) -> tuple[str, ValidationOutput | None, DeterministicMetrics | None, str | None]:
     """Invoke a single validator using asyncio.to_thread.
 
@@ -316,6 +317,8 @@ async def _invoke_validator(
             instead of "sonnet" when using GLM via settings file).
         thinking: Enable thinking mode for supported providers (e.g., kimi).
             If None, auto-detected from model name.
+        reasoning_effort: Reasoning effort level for supported providers (codex).
+            Valid values: minimal, low, medium, high, xhigh.
 
     Returns:
         Tuple of (provider_id, ValidationOutput or None, DeterministicMetrics or None,
@@ -342,6 +345,7 @@ async def _invoke_validator(
                 cwd=cwd,
                 display_model=display_model,
                 thinking=thinking,
+                reasoning_effort=reasoning_effort,
             ),
             timeout=timeout,
         )
@@ -555,6 +559,7 @@ async def run_validation_phase(
             cwd=project_path,
             display_model=multi_config.display_model,
             thinking=multi_config.thinking,
+            reasoning_effort=multi_config.reasoning_effort,
         )
         task = asyncio.create_task(delayed_invoke(delay, coro))
         tasks.append(task)
@@ -597,7 +602,7 @@ async def run_validation_phase(
     if dv_enabled:
         dv_delay = parse_parallel_delay(config.parallel_delay) * len(tasks)
         dv_coro = run_deep_verify_validation(
-            artifact_text=prompt,
+            artifact_text=None,  # Hook loads story file internally
             config=config,
             project_path=project_path,
             epic_num=epic_num,

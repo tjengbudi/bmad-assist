@@ -45,6 +45,7 @@ from bmad_assist.providers.base import (
     ProviderResult,
     extract_tool_details,
     format_tag,
+    is_full_stream,
     should_print_progress,
     validate_settings_file,
     write_progress,
@@ -218,6 +219,7 @@ class AmpProvider(BaseProvider):
         display_model: str | None = None,
         thinking: bool | None = None,
         cancel_token: threading.Event | None = None,
+        reasoning_effort: str | None = None,
     ) -> ProviderResult:
         """Execute Amp CLI with the given prompt using JSON streaming.
 
@@ -454,11 +456,14 @@ class AmpProvider(BaseProvider):
                                             if text:
                                                 text_parts.append(text)
                                                 if should_print_progress():
-                                                    preview = text[:200]
-                                                    if len(text) > 200:
-                                                        preview += "..."
                                                     tag = format_tag("ASSISTANT", color_idx)
-                                                    write_progress(f"{tag} {preview}")
+                                                    if is_full_stream():
+                                                        write_progress(f"{tag} {text}")
+                                                    else:
+                                                        preview = text[:200]
+                                                        if len(text) > 200:
+                                                            preview += "..."
+                                                        write_progress(f"{tag} {preview}")
 
                                         elif item.get("type") == "tool_use":
                                             tool_name: str = item.get("name") or "unknown"
@@ -481,16 +486,23 @@ class AmpProvider(BaseProvider):
                                                 )
                                             if should_print_progress():
                                                 tool_input = item.get("input", {})
-                                                details = extract_tool_details(
-                                                    normalized_tool_name, tool_input
-                                                )
                                                 tag = format_tag(
                                                     f"TOOL {normalized_tool_name}", color_idx
                                                 )
-                                                if details:
-                                                    write_progress(f"{tag} {details}")
+                                                if is_full_stream():
+                                                    import json as _json
+
+                                                    write_progress(
+                                                        f"{tag} {_json.dumps(tool_input, indent=2)}"
+                                                    )
                                                 else:
-                                                    write_progress(f"{tag}")
+                                                    details = extract_tool_details(
+                                                        normalized_tool_name, tool_input
+                                                    )
+                                                    if details:
+                                                        write_progress(f"{tag} {details}")
+                                                    else:
+                                                        write_progress(f"{tag}")
 
                             elif msg_type == "result":
                                 # Final result may contain the full response
@@ -589,9 +601,9 @@ class AmpProvider(BaseProvider):
                         partial_result=partial_result,
                     ) from None
 
-                # Wait for threads to finish
-                stdout_thread.join()
-                stderr_thread.join()
+                # Wait for threads to finish (timeout prevents hang if reader stuck)
+                stdout_thread.join(timeout=10)
+                stderr_thread.join(timeout=10)
 
             except FileNotFoundError as e:
                 logger.error("Amp CLI not found in PATH")
