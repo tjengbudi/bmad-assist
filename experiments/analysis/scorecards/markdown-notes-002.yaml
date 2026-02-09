@@ -1,0 +1,171 @@
+fixture: markdown-notes-002
+generated_at: '2026-02-08T19:17:18.095849+00:00'
+generator_version: '2.0'
+mode: automated
+scores:
+  completeness:
+    weight: 25
+    score: 15.4
+    details:
+      test_to_code_ratio:
+        max: 10
+        score: 3.9
+        ratio: 0.78
+        test_sloc: 6980
+        prod_sloc: 8973
+      no_todos:
+        max: 5
+        score: 3.5
+        metric: 3
+        notes: src/lib/components/Preview.svelte (1); src/routes/+page.svelte (2)
+      no_placeholders:
+        max: 5
+        score: 3
+        metric: 2
+        patterns_found:
+        - TODO comment
+      no_empty_files:
+        max: 5
+        score: 5
+        metric: 0
+  functionality:
+    weight: 25
+    score: 10.0
+    details:
+      build:
+        max: 10
+        score: 0
+        success: false
+        command: npm run build
+        errors:
+        - 'error during build:'
+        - 'Error: Files prefixed with + are reserved (saw src/routes/api/folders/+server.test.ts)'
+        - '    at analyze (file:///home/pawel/projects/bmad-assist-22/experiments/fixtures/markdown-notes-002/node_modules/@sveltejs/kit/src/core/sync/create_manifest_data/index.js:501:10)'
+        - '    at walk (file:///home/pawel/projects/bmad-assist-22/experiments/fixtures/markdown-notes-002/node_modules/@sveltejs/kit/src/core/sync/create_manifest_data/index.js:267:18)'
+        - '    at walk (file:///home/pawel/projects/bmad-assist-22/experiments/fixtures/markdown-notes-002/node_modules/@sveltejs/kit/src/core/sync/create_manifest_data/index.js:353:6)'
+      unit_tests:
+        max: 10.0
+        score: 10.0
+        metric: 734/735
+        passed: 734
+        failed: 1
+        skipped: 0
+        errors: []
+      behavior_tests:
+        max: 5
+        score: 0
+        metric: 0/0
+        passed: 0
+        failed: 0
+        notes: ''
+  code_quality:
+    weight: 20
+    score: 11.1
+    details:
+      linting:
+        max: 6
+        score: 2.4
+        skipped: true
+        partial: true
+        tool: eslint
+        warning: eslint not available
+      complexity:
+        max: 4
+        score: 0
+        tool: none
+        not_measured: true
+        reason: no reliable TypeScript complexity tool available
+      security:
+        max: 4
+        score: 3.9
+        tool: npm_audit
+        high: 0
+        medium: 0
+        low: 3
+        issues: []
+        kloc: 9.0
+        weighted_per_kloc: 0.017
+      test_pass_rate:
+        max: 3
+        score: 3.0
+        pass_rate: 0.9986
+        source: functionality
+      code_maturity:
+        max: 3
+        score: 1.8
+        todos: 3
+        placeholders: 2
+      correctness_proxies:
+      - id: any_cast
+        file: src/lib/stores/notes.test.ts
+        description: TypeScript 'any' type usage (bypasses type safety)
+      - id: console_log
+        file: src/lib/markdown/parser.test.ts
+        description: console.log left in production code
+      - id: console_log
+        file: src/lib/markdown/parser.test.ts
+        description: console.log left in production code
+      - id: any_cast
+        file: src/routes/note/[id]/+page.test.ts
+        description: TypeScript 'any' type usage (bypasses type safety)
+      - id: any_cast
+        file: src/routes/note/[id]/+page.test.ts
+        description: TypeScript 'any' type usage (bypasses type safety)
+      - id: any_cast
+        file: src/routes/note/[id]/+page.test.ts
+        description: TypeScript 'any' type usage (bypasses type safety)
+      - id: any_cast
+        file: src/routes/note/[id]/+page.test.ts
+        description: TypeScript 'any' type usage (bypasses type safety)
+      - id: any_cast
+        file: src/routes/note/[id]/+page.test.ts
+        description: TypeScript 'any' type usage (bypasses type safety)
+      - id: any_cast
+        file: src/routes/note/[id]/+page.test.ts
+        description: TypeScript 'any' type usage (bypasses type safety)
+  documentation:
+    weight: 15
+    score: 0
+    details:
+      readme_exists:
+        max: 4
+        score: 0
+        exists: false
+        length: 0
+      readme_sections:
+        max: 3
+        score: 0
+        has_install: false
+        has_usage: false
+        has_config: false
+      api_docs:
+        max: 4
+        score: 0
+        exists: false
+        format: ''
+        location: ''
+      inline_comments:
+        max: 4
+        score: 0
+        ratio: 4.4
+        sampled_files:
+        - src/app.d.ts
+        - src/lib/errors.ts
+        - src/lib/types.ts
+        - src/lib/actions/clickOutside.ts
+        - src/lib/utils/debounce.ts
+  ui_ux:
+    weight: 15
+    score: null
+    applicable: false
+    details: Fixture has no UI - points redistributed
+totals:
+  raw_score: 36.5
+  max_possible: 85
+  weighted_score: 42.9
+  grade: F
+notes: ''
+recommendations: []
+comparison:
+  baseline_fixture: null
+  delta: {}

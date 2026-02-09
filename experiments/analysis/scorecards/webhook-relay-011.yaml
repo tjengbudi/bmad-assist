@@ -1,0 +1,350 @@
+fixture: webhook-relay-011
+generated_at: '2026-02-08T16:32:39.853652+00:00'
+generator_version: '2.0'
+mode: automated
+scores:
+  completeness:
+    weight: 25
+    score: 25.0
+    details:
+      test_to_code_ratio:
+        max: 10
+        score: 10
+        ratio: 2.24
+        test_sloc: 15270
+        prod_sloc: 6829
+      no_todos:
+        max: 5
+        score: 5.0
+        metric: 0
+        notes: ''
+      no_placeholders:
+        max: 5
+        score: 5
+        metric: 0
+        patterns_found: []
+      no_empty_files:
+        max: 5
+        score: 5
+        metric: 0
+  functionality:
+    weight: 25
+    score: 22.0
+    details:
+      build:
+        max: 10
+        score: 10
+        success: true
+        command: go build ./...
+        errors: []
+      unit_tests:
+        max: 10.0
+        score: 10.0
+        metric: 1179/1183
+        passed: 1179
+        failed: 4
+        skipped: 0
+        errors: []
+      behavior_tests:
+        max: 5
+        score: 2
+        metric: 0/0
+        passed: 0
+        failed: 0
+        notes: 2 test files found in webhook-relay/
+  code_quality:
+    weight: 20
+    score: 19.5
+    details:
+      linting:
+        max: 6
+        score: 6
+        tool: go vet
+        errors: 0
+        warnings: 0
+        top_issues: []
+      complexity:
+        max: 4
+        score: 4
+        tool: gocyclo
+        average: 2.95
+        max_function: ''
+        max_value: 0
+      security:
+        max: 4
+        score: 3.5
+        tool: gosec
+        high: 0
+        medium: 0
+        low: 17
+        issues: []
+        kloc: 6.8
+        weighted_per_kloc: 0.124
+        fp_downgraded: 3
+      test_pass_rate:
+        max: 3
+        score: 3.0
+        pass_rate: 0.9966
+        source: functionality
+      code_maturity:
+        max: 3
+        score: 3.0
+        todos: 0
+        placeholders: 0
+      correctness_proxies:
+      - id: goroutine_no_ctx
+        file: internal/routing/router_test.go
+        description: goroutine launched without context propagation
+      - id: goroutine_no_ctx
+        file: internal/routing/router_test.go
+        description: goroutine launched without context propagation
+      - id: goroutine_no_ctx
+        file: internal/routing/router_test.go
+        description: goroutine launched without context propagation
+      - id: goroutine_no_ctx
+        file: internal/routing/router_test.go
+        description: goroutine launched without context propagation
+      - id: lock_no_defer
+        file: internal/routing/router.go
+        description: mutex locked without defer Unlock
+      - id: lock_no_defer
+        file: internal/routing/router.go
+        description: mutex locked without defer Unlock
+      - id: lock_no_defer
+        file: internal/routing/router.go
+        description: mutex locked without defer Unlock
+      - id: lock_no_defer
+        file: internal/routing/router.go
+        description: mutex locked without defer Unlock
+      - id: lock_no_defer
+        file: internal/routing/router.go
+        description: mutex locked without defer Unlock
+      - id: lock_no_defer
+        file: internal/routing/router.go
+        description: mutex locked without defer Unlock
+      - id: lock_no_defer
+        file: internal/routing/router.go
+        description: mutex locked without defer Unlock
+      - id: goroutine_no_ctx
+        file: internal/delivery/sender_test.go
+        description: goroutine launched without context propagation
+      - id: http_no_timeout
+        file: internal/delivery/sender.go
+        description: http.Client without Timeout
+      - id: goroutine_no_ctx
+        file: internal/delivery/retry.go
+        description: goroutine launched without context propagation
+      - id: lock_no_defer
+        file: internal/delivery/retry.go
+        description: mutex locked without defer Unlock
+      - id: lock_no_defer
+        file: internal/delivery/retry.go
+        description: mutex locked without defer Unlock
+      - id: sql_no_pool_limit
+        file: internal/delivery/retry_test.go
+        description: sql.Open without connection pool limit
+      - id: goroutine_no_ctx
+        file: internal/delivery/dlq.go
+        description: goroutine launched without context propagation
+      - id: goroutine_no_ctx
+        file: internal/delivery/fanout_test.go
+        description: goroutine launched without context propagation
+      - id: sql_no_pool_limit
+        file: internal/delivery/history_test.go
+        description: sql.Open without connection pool limit
+      - id: goroutine_no_ctx
+        file: internal/delivery/queue_test.go
+        description: goroutine launched without context propagation
+      - id: sql_no_pool_limit
+        file: internal/delivery/queue_test.go
+        description: sql.Open without connection pool limit
+      - id: sql_no_pool_limit
+        file: internal/delivery/queue_test.go
+        description: sql.Open without connection pool limit
+      - id: sql_no_pool_limit
+        file: internal/delivery/queue_test.go
+        description: sql.Open without connection pool limit
+      - id: lock_no_defer
+        file: internal/delivery/health.go
+        description: mutex locked without defer Unlock
+      - id: lock_no_defer
+        file: internal/delivery/health.go
+        description: mutex locked without defer Unlock
+      - id: lock_no_defer
+        file: internal/delivery/health.go
+        description: mutex locked without defer Unlock
+      - id: sql_no_pool_limit
+        file: internal/delivery/dlq_test.go
+        description: sql.Open without connection pool limit
+      - id: sql_no_pool_limit
+        file: internal/delivery/dlq_test.go
+        description: sql.Open without connection pool limit
+      - id: goroutine_no_ctx
+        file: internal/delivery/history.go
+        description: goroutine launched without context propagation
+      - id: goroutine_no_ctx
+        file: internal/delivery/health_test.go
+        description: goroutine launched without context propagation
+      - id: sql_no_pool_limit
+        file: internal/storage/sqlite_test.go
+        description: sql.Open without connection pool limit
+      - id: sql_no_pool_limit
+        file: internal/storage/sqlite.go
+        description: sql.Open without connection pool limit
+      - id: goroutine_no_ctx
+        file: internal/transform/jsonpath_test.go
+        description: goroutine launched without context propagation
+      - id: goroutine_no_ctx
+        file: internal/transform/transformer_test.go
+        description: goroutine launched without context propagation
+      - id: goroutine_no_ctx
+        file: internal/transform/template_test.go
+        description: goroutine launched without context propagation
+      - id: goroutine_no_ctx
+        file: internal/server/shutdown_test.go
+        description: goroutine launched without context propagation
+      - id: goroutine_no_ctx
+        file: internal/server/shutdown_test.go
+        description: goroutine launched without context propagation
+      - id: goroutine_no_ctx
+        file: internal/server/shutdown_test.go
+        description: goroutine launched without context propagation
+      - id: goroutine_no_ctx
+        file: internal/server/shutdown_test.go
+        description: goroutine launched without context propagation
+      - id: goroutine_no_ctx
+        file: internal/server/shutdown_test.go
+        description: goroutine launched without context propagation
+      - id: goroutine_no_ctx
+        file: internal/server/shutdown_test.go
+        description: goroutine launched without context propagation
+      - id: goroutine_no_ctx
+        file: internal/server/shutdown_test.go
+        description: goroutine launched without context propagation
+      - id: goroutine_no_ctx
+        file: internal/server/server_test.go
+        description: goroutine launched without context propagation
+      - id: goroutine_no_ctx
+        file: internal/server/server.go
+        description: goroutine launched without context propagation
+      - id: lock_no_defer
+        file: internal/server/server.go
+        description: mutex locked without defer Unlock
+      - id: lock_no_defer
+        file: internal/server/server.go
+        description: mutex locked without defer Unlock
+      - id: lock_no_defer
+        file: internal/server/handlers/system_health_test.go
+        description: mutex locked without defer Unlock
+      - id: lock_no_defer
+        file: internal/server/handlers/system_health_test.go
+        description: mutex locked without defer Unlock
+      - id: sql_no_pool_limit
+        file: internal/server/handlers/system_health_test.go
+        description: sql.Open without connection pool limit
+      - id: sql_no_pool_limit
+        file: internal/server/handlers/system_health_test.go
+        description: sql.Open without connection pool limit
+      - id: sql_no_pool_limit
+        file: internal/server/handlers/system_health_test.go
+        description: sql.Open without connection pool limit
+      - id: sql_no_pool_limit
+        file: internal/server/handlers/system_health_test.go
+        description: sql.Open without connection pool limit
+      - id: sql_no_pool_limit
+        file: internal/server/handlers/system_health_test.go
+        description: sql.Open without connection pool limit
+      - id: sql_no_pool_limit
+        file: internal/server/handlers/system_health_test.go
+        description: sql.Open without connection pool limit
+      - id: sql_no_pool_limit
+        file: internal/server/handlers/system_health_test.go
+        description: sql.Open without connection pool limit
+      - id: sql_no_pool_limit
+        file: internal/server/handlers/system_health_test.go
+        description: sql.Open without connection pool limit
+      - id: sql_no_pool_limit
+        file: internal/server/handlers/system_health_test.go
+        description: sql.Open without connection pool limit
+      - id: sql_no_pool_limit
+        file: internal/server/handlers/system_health_test.go
+        description: sql.Open without connection pool limit
+      - id: sql_no_pool_limit
+        file: internal/server/handlers/system_health_test.go
+        description: sql.Open without connection pool limit
+      - id: sql_no_pool_limit
+        file: internal/server/handlers/system_health_test.go
+        description: sql.Open without connection pool limit
+      - id: sql_no_pool_limit
+        file: internal/server/handlers/system_health_test.go
+        description: sql.Open without connection pool limit
+      - id: sql_no_pool_limit
+        file: internal/server/handlers/system_health_test.go
+        description: sql.Open without connection pool limit
+      - id: sql_no_pool_limit
+        file: internal/server/handlers/system_health_test.go
+        description: sql.Open without connection pool limit
+      - id: lock_no_defer
+        file: internal/server/handlers/system_health.go
+        description: mutex locked without defer Unlock
+      - id: goroutine_no_ctx
+        file: internal/server/handlers/dlq_admin_test.go
+        description: goroutine launched without context propagation
+      - id: sql_no_pool_limit
+        file: internal/server/handlers/dlq_admin_test.go
+        description: sql.Open without connection pool limit
+      - id: sql_no_pool_limit
+        file: internal/server/handlers/delivery_admin_test.go
+        description: sql.Open without connection pool limit
+      - id: goroutine_no_ctx
+        file: cmd/relay/main_test.go
+        description: goroutine launched without context propagation
+      - id: goroutine_no_ctx
+        file: cmd/relay/main.go
+        description: goroutine launched without context propagation
+  documentation:
+    weight: 15
+    score: 1
+    details:
+      readme_exists:
+        max: 4
+        score: 0
+        exists: false
+        length: 0
+      readme_sections:
+        max: 3
+        score: 0
+        has_install: false
+        has_usage: false
+        has_config: false
+      api_docs:
+        max: 4
+        score: 0
+        exists: false
+        format: ''
+        location: ''
+      inline_comments:
+        max: 4
+        score: 1
+        ratio: 8.7
+        sampled_files:
+        - internal/routing/destination_test.go
+        - internal/routing/route_transform_test.go
+        - internal/routing/route_test.go
+        - internal/routing/router_test.go
+        - internal/routing/route.go
+  ui_ux:
+    weight: 15
+    score: null
+    applicable: false
+    details: Fixture has no UI - points redistributed
+totals:
+  raw_score: 67.5
+  max_possible: 85
+  weighted_score: 79.4
+  grade: C
+notes: ''
+recommendations: []
+comparison:
+  baseline_fixture: null
+  delta: {}

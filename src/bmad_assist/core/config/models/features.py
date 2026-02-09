@@ -119,6 +119,24 @@ class TimeoutsConfig(BaseModel):
         description="Timeout for security review agent (default 600s, separate from code_review)",
         json_schema_extra={"security": "safe", "ui_widget": "number", "unit": "s"},
     )
+    qa_plan_generate: int | None = Field(
+        default=None,
+        ge=60,
+        description="Timeout for qa_plan_generate phase (None = use default)",
+        json_schema_extra={"security": "safe", "ui_widget": "number", "unit": "s"},
+    )
+    qa_plan_execute: int | None = Field(
+        default=None,
+        ge=60,
+        description="Timeout for qa_plan_execute phase (None = use default)",
+        json_schema_extra={"security": "safe", "ui_widget": "number", "unit": "s"},
+    )
+    qa_remediate: int | None = Field(
+        default=None,
+        ge=60,
+        description="Timeout for qa_remediate phase (None = use default)",
+        json_schema_extra={"security": "safe", "ui_widget": "number", "unit": "s"},
+    )
 
     def get_timeout(self, phase: str) -> int:
         """Get timeout for a specific phase.
@@ -298,6 +316,27 @@ class QAConfig(BaseModel):
         json_schema_extra={"security": "dangerous"},
     )
     playwright: PlaywrightConfig = Field(default_factory=PlaywrightConfig)
+    remediate_max_iterations: int = Field(
+        default=2,
+        ge=1,
+        le=5,
+        description="Max fix→retest cycles for qa_remediate (1-5)",
+        json_schema_extra={"security": "safe", "ui_widget": "number"},
+    )
+    remediate_max_age_days: int = Field(
+        default=7,
+        ge=1,
+        le=30,
+        description="Skip sources older than this many days (1-30)",
+        json_schema_extra={"security": "safe", "ui_widget": "number"},
+    )
+    remediate_safety_cap: float = Field(
+        default=0.8,
+        ge=0.1,
+        le=1.0,
+        description="If >this fraction is AUTO-FIX, overflow → ESCALATE (0.1-1.0)",
+        json_schema_extra={"security": "safe", "ui_widget": "number"},
+    )
 
 
 class AntipatternConfig(BaseModel):

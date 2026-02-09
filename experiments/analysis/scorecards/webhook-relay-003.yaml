@@ -1,16 +1,18 @@
 fixture: webhook-relay-003
-generated_at: '2026-01-27T01:06:06.972960+00:00'
-generator_version: '1.0'
+generated_at: '2026-02-07T12:19:24.049622+00:00'
+generator_version: '2.0'
 mode: automated
 scores:
   completeness:
     weight: 25
-    score: 10
+    score: 20
     details:
-      stories_completed:
+      test_to_code_ratio:
         max: 10
-        score: 0
-        metric: 0/0
+        score: 10
+        ratio: 2.19
+        test_sloc: 15745
+        prod_sloc: 7204
       no_todos:
         max: 5
         score: 0
@@ -53,30 +55,59 @@ scores:
         notes: 2 test files found in webhook-relay/
   code_quality:
     weight: 20
-    score: 14
+    score: 16.3
     details:
       linting:
-        max: 8
-        score: 8
+        max: 6
+        score: 6
         tool: go vet
         errors: 0
         warnings: 0
         top_issues: []
       complexity:
-        max: 6
-        score: 6
+        max: 4
+        score: 4
         tool: gocyclo
         average: 2.65
         max_function: ''
         max_value: 0
       security:
-        max: 6
-        score: 0
+        max: 4
+        score: 3.3
         tool: gosec
-        high: 0
+        high: 1
         medium: 0
-        low: 0
+        low: 5
         issues: []
+        kloc: 7.2
+        weighted_per_kloc: 0.174
+        fp_downgraded: 1
+      test_pass_rate:
+        max: 3
+        score: 3.0
+        pass_rate: 1.0
+        source: functionality
+      code_maturity:
+        max: 3
+        score: 0
+        todos: 16
+        placeholders: 0
+      correctness_proxies:
+      - id: goroutine_no_ctx
+        file: internal/routing/router_test.go
+        description: goroutine launched without context propagation
+      - id: goroutine_no_ctx
+        file: internal/delivery/worker_liveness_test.go
+        description: goroutine launched without context propagation
+      - id: lock_no_defer
+        file: internal/delivery/fanout.go
+        description: mutex locked without defer Unlock
+      - id: goroutine_no_ctx
+        file: internal/delivery/health_test.go
+        description: goroutine launched without context propagation
+      - id: sql_no_pool_limit
+        file: internal/server/handlers/health_test.go
+        description: sql.Open without connection pool limit
   documentation:
     weight: 15
     score: 1
@@ -114,10 +145,10 @@ scores:
     applicable: false
     details: Fixture has no UI - points redistributed
 totals:
-  raw_score: 47.0
+  raw_score: 59.3
   max_possible: 85
-  weighted_score: 55.3
-  grade: F
+  weighted_score: 69.8
+  grade: D
 notes: ''
 recommendations: []
 comparison:

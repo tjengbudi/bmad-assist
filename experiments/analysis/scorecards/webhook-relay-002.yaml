@@ -1,16 +1,18 @@
 fixture: webhook-relay-002
-generated_at: '2026-01-26T13:31:59.984983+00:00'
-generator_version: '1.0'
+generated_at: '2026-02-07T12:17:40.675807+00:00'
+generator_version: '2.0'
 mode: automated
 scores:
   completeness:
     weight: 25
-    score: 15.0
+    score: 25.0
     details:
-      stories_completed:
+      test_to_code_ratio:
         max: 10
-        score: 0
-        metric: 0/0
+        score: 10
+        ratio: 2.26
+        test_sloc: 16936
+        prod_sloc: 7478
       no_todos:
         max: 5
         score: 5.0
@@ -57,30 +59,56 @@ scores:
         notes: 2 test files found in webhook-relay/
   code_quality:
     weight: 20
-    score: 6
+    score: 8.9
     details:
       linting:
-        max: 8
+        max: 6
         score: 0
         tool: go vet
         errors: 22
         warnings: 0
         top_issues: []
       complexity:
-        max: 6
-        score: 6
+        max: 4
+        score: 4
         tool: gocyclo
         average: 2.64
         max_function: ''
         max_value: 0
       security:
-        max: 6
-        score: 0
+        max: 4
+        score: 1.9
         tool: gosec
-        high: 0
-        medium: 0
-        low: 0
+        high: 1
+        medium: 3
+        low: 42
         issues: []
+        kloc: 7.5
+        weighted_per_kloc: 0.535
+        fp_downgraded: 1
+      test_pass_rate:
+        max: 3
+        score: 0
+        pass_rate: 0.0
+        source: functionality
+      code_maturity:
+        max: 3
+        score: 3.0
+        todos: 0
+        placeholders: 0
+      correctness_proxies:
+      - id: lock_no_defer
+        file: internal/delivery/fanout.go
+        description: mutex locked without defer Unlock
+      - id: goroutine_no_ctx
+        file: internal/delivery/health_test.go
+        description: goroutine launched without context propagation
+      - id: lock_no_defer
+        file: internal/delivery/health_test.go
+        description: mutex locked without defer Unlock
+      - id: sql_no_pool_limit
+        file: internal/storage/sqlite.go
+        description: sql.Open without connection pool limit
   documentation:
     weight: 15
     score: 1
@@ -118,9 +146,9 @@ scores:
     applicable: false
     details: Fixture has no UI - points redistributed
 totals:
-  raw_score: 24.0
+  raw_score: 36.9
   max_possible: 85
-  weighted_score: 28.2
+  weighted_score: 43.4
   grade: F
 notes: ''
 recommendations: []

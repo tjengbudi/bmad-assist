@@ -76,6 +76,7 @@ WORKFLOW_TO_PHASE: dict[str, Phase] = {
     "retrospective": Phase.RETROSPECTIVE,
     "qa-plan-generate": Phase.QA_PLAN_GENERATE,
     "qa-plan-execute": Phase.QA_PLAN_EXECUTE,
+    "qa-remediate": Phase.QA_REMEDIATE,
     # "test-design": Skipped (no Phase mapping in core.state.Phase)
 }
 

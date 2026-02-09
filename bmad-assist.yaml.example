@@ -19,6 +19,9 @@ timeouts:
   validate_story_synthesis: 900 # 15 m
   dev_story: 3600               # 1 h
   code_review_synthesis: 1200   # 20 m
+  qa_plan_generate: 1200        # 20 m
+  qa_plan_execute: 3600         # 1 h (Playwright!)
+  qa_remediate: 3600            # 1 h (LLM fixes + re-test)
   
 providers:
   # Default provider used for single-LLM phases when no phase_models specified
@@ -122,8 +125,8 @@ phase_models:
   # When phase_models defines a multi-LLM phase, ONLY the listed providers are used.
   # Master is NOT auto-added - you have full control over the validator/reviewer list.
   validate_story:
-    # - provider: gemini
-    #   model: gemini-3-pro-preview
+    - provider: gemini
+      model: gemini-3-pro-preview
     - provider: gemini
       model: gemini-3-flash-preview
     - provider: gemini
@@ -137,11 +140,7 @@ phase_models:
     #   thinking: true
     # - provider: kimi
     #   model: kimi-code/kimi-for-coding
-      thinking: true
-    - provider: claude
-      model: sonnet
-      model_name: glm-4.7
-      settings: ~/.claude/glm.json
+    #   thinking: true
     - provider: claude
       model: sonnet
       model_name: glm-4.7
@@ -150,11 +149,15 @@ phase_models:
     #   model: sonnet
     #   model_name: glm-4.7
     #   settings: ~/.claude/glm.json
+    # - provider: claude
+    #   model: sonnet
+    #   model_name: glm-4.7
+    #   settings: ~/.claude/glm.json
 
   # Same for code_review - full control over reviewer list
   code_review:
-    # - provider: gemini
-    #   model: gemini-3-pro-preview
+    - provider: gemini
+      model: gemini-3-pro-preview
     - provider: gemini
       model: gemini-3-flash-preview
     - provider: gemini
@@ -173,10 +176,10 @@ phase_models:
       model: sonnet
       model_name: glm-4.7
       settings: ~/.claude/glm.json
-    - provider: claude
-      model: sonnet
-      model_name: glm-4.7
-      settings: ~/.claude/glm.json
+    # - provider: claude
+    #   model: sonnet
+    #   model_name: glm-4.7
+    #   settings: ~/.claude/glm.json
     # - provider: claude
     #   model: sonnet
     #   model_name: glm-4.7
@@ -258,6 +261,9 @@ loop:
     - trace                   # Generate traceability matrix
     - tea_nfr_assess          # NFR assessment before release
     - retrospective
+    - qa_plan_generate        # Generate E2E test plan
+    - qa_plan_execute         # Execute E2E tests
+    - qa_remediate            # Collect issues, auto-fix or escalate
 
 # TEA (Test Architect Enterprise) configuration
 testarch:
@@ -289,7 +295,7 @@ deep_verify:
   # If not specified, uses global 'helper' provider from providers section
   # Uncomment to override with a different provider for Deep Verify methods
   # provider:
-  #   provider: claude     # Provider name: claude, claude-sdk, gemini, kimi
+  #   provider: claude                # Provider name: claude, gemini, kimi
   #   model: haiku                    # Model identifier for LLM calls
   #   # model_name: custom-name       # Display name (optional, for logs)
   #   # settings: ~/.claude/custom.json  # Settings file path (optional)
@@ -363,7 +369,7 @@ deep_verify:
 
 security_agent:
   enabled: true
-  max_findings: 15
+  max_findings: 20
 
 notifications:
   enabled: true

@@ -11,7 +11,6 @@ from pathlib import Path
 import typer
 
 from bmad_assist.cli_utils import (
-    EXIT_CONFIG_ERROR,
     EXIT_ERROR,
     _error,
     _setup_logging,
@@ -30,7 +29,7 @@ test_app = typer.Typer(
 
 # Hardcoded paths per tech-spec
 FIXTURES_DIR = "experiments/fixtures"
-SCORECARD_SCRIPT = "experiments/testing-framework/common/scorecard.py"
+SCORECARD_MODULE = "bmad_assist.experiments.testing.scorecard"
 
 
 def _validate_fixture(project_path: Path, fixture: str) -> Path:
@@ -99,13 +98,7 @@ def test_scorecard(
     # Pre-validate fixture exists before spawning subprocess
     _validate_fixture(project_path, fixture)
 
-    # Build command using direct script path (not -m, as dir uses hyphens)
-    scorecard_path = project_path / SCORECARD_SCRIPT
-    if not scorecard_path.exists():
-        _error(f"Scorecard script not found: {SCORECARD_SCRIPT}")
-        raise typer.Exit(code=EXIT_CONFIG_ERROR)
-
-    cmd = [sys.executable, str(scorecard_path), fixture]
+    cmd = [sys.executable, "-m", SCORECARD_MODULE, fixture]
 
     if output:
         cmd.extend(["--output", output])
@@ -184,13 +177,7 @@ def test_compare(
     _validate_fixture(project_path, fixture1)
     _validate_fixture(project_path, fixture2)
 
-    # Build command using direct script path (not -m, as dir uses hyphens)
-    scorecard_path = project_path / SCORECARD_SCRIPT
-    if not scorecard_path.exists():
-        _error(f"Scorecard script not found: {SCORECARD_SCRIPT}")
-        raise typer.Exit(code=EXIT_CONFIG_ERROR)
-
-    cmd = [sys.executable, str(scorecard_path), fixture1, "--compare", fixture2]
+    cmd = [sys.executable, "-m", SCORECARD_MODULE, fixture1, "--compare", fixture2]
 
     if output:
         cmd.extend(["--output", output])

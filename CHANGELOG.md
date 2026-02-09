@@ -2,6 +2,32 @@
 
 All notable changes to bmad-assist are documented in this file.
 
+## [0.4.27] - 2026-02-08
+
+### Added
+- **QA Remediate** - New `qa_remediate` epic_teardown phase: 6-source issue aggregation, master LLM fix→retest loop with regression detection, escalation reports. Externalized XML prompt (`qa/prompts/remediate.xml`) with proactive INVESTIGATE → FIX → ESCALATE workflow. Configurable via `QaConfig` (max iterations, age, safety cap)
+- **Scorecard: Multi-Stack** - Python and Node/TS stack detection alongside Go; modular `stacks/` registry
+- **A/B Testing** - QA artifacts snapshot support; loop config phase gating (phases filtered through variant's `loop:` config)
+
+### Changed
+- **Experiments** - Relocated evaluation/testing/scorecard from `experiments/` into `src/bmad_assist/experiments/`; monolithic `scorecard.py` split into `scorecard/` package
+
+### Fixed
+- **Sprint Sync** - Corrupted sprint-status log level downgraded from ERROR to WARNING
+
+## [0.4.26] - 2026-02-08
+
+### Added
+- **A/B Analysis CLI** - Standalone `ab-analysis` command to re-run LLM analysis on existing A/B test results
+
+### Changed
+- **A/B Testing: Per-Story Refs** - Stories use `{id, ref}` objects; each pins to its own git commit. `analysis: true` enables LLM-powered variant comparison
+- **Docs** - README rewrite with plain-language intro and new feature sections; experiments.md and ab-testing.md updated to match current code
+
+### Fixed
+- **Security: CodeQL Alerts** - Resolve 10 of 11 alerts: workflow permissions, socket binds hardened to localhost, URL assertion refactors
+- **A/B: ConfigError on Analysis** - Fixed singleton reset crash in `generate_ab_analysis()`
+
 ## [0.4.25] - 2026-02-08
 
 ### Added

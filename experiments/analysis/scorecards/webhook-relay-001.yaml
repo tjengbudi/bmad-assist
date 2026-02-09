@@ -1,16 +1,18 @@
 fixture: webhook-relay-001
-generated_at: '2026-01-26T13:27:39.558965+00:00'
-generator_version: '1.0'
+generated_at: '2026-02-07T12:15:54.903138+00:00'
+generator_version: '2.0'
 mode: automated
 scores:
   completeness:
     weight: 25
-    score: 12.0
+    score: 22.0
     details:
-      stories_completed:
+      test_to_code_ratio:
         max: 10
-        score: 0
-        metric: 0/0
+        score: 10
+        ratio: 2.09
+        test_sloc: 14823
+        prod_sloc: 7076
       no_todos:
         max: 5
         score: 4.0
@@ -57,30 +59,86 @@ scores:
         notes: 2 test files found in webhook-relay/
   code_quality:
     weight: 20
-    score: 9
+    score: 11.7
     details:
       linting:
-        max: 8
+        max: 6
         score: 0
         tool: go vet
         errors: 8
         warnings: 0
         top_issues: []
       complexity:
-        max: 6
-        score: 6
+        max: 4
+        score: 4
         tool: gocyclo
         average: 2.7
         max_function: ''
         max_value: 0
       security:
-        max: 6
-        score: 3
+        max: 4
+        score: 2.7
         tool: gosec
         high: 2
-        medium: 3
-        low: 5
+        medium: 0
+        low: 6
         issues: []
+        kloc: 7.1
+        weighted_per_kloc: 0.325
+        fp_downgraded: 1
+      test_pass_rate:
+        max: 3
+        score: 3.0
+        pass_rate: 1.0
+        source: functionality
+      code_maturity:
+        max: 3
+        score: 2.0
+        todos: 2
+        placeholders: 2
+      correctness_proxies:
+      - id: lock_no_defer
+        file: internal/delivery/fanout_test.go
+        description: mutex locked without defer Unlock
+      - id: lock_no_defer
+        file: internal/delivery/fanout.go
+        description: mutex locked without defer Unlock
+      - id: sql_no_pool_limit
+        file: internal/delivery/history_test.go
+        description: sql.Open without connection pool limit
+      - id: sql_no_pool_limit
+        file: internal/delivery/dlq_test.go
+        description: sql.Open without connection pool limit
+      - id: sql_no_pool_limit
+        file: internal/delivery/dlq_purge_test.go
+        description: sql.Open without connection pool limit
+      - id: sql_no_pool_limit
+        file: internal/delivery/retry_worker_test.go
+        description: sql.Open without connection pool limit
+      - id: goroutine_no_ctx
+        file: internal/metrics/prometheus_test.go
+        description: goroutine launched without context propagation
+      - id: goroutine_no_ctx
+        file: internal/transform/pipeline_test.go
+        description: goroutine launched without context propagation
+      - id: goroutine_no_ctx
+        file: internal/transform/passthrough_test.go
+        description: goroutine launched without context propagation
+      - id: sql_no_pool_limit
+        file: internal/server/server_test.go
+        description: sql.Open without connection pool limit
+      - id: sql_no_pool_limit
+        file: internal/server/handlers/admin_dlq_test.go
+        description: sql.Open without connection pool limit
+      - id: sql_no_pool_limit
+        file: internal/server/handlers/admin_history_test.go
+        description: sql.Open without connection pool limit
+      - id: sql_no_pool_limit
+        file: internal/server/handlers/admin_routes_test.go
+        description: sql.Open without connection pool limit
+      - id: sql_no_pool_limit
+        file: internal/server/handlers/health_test.go
+        description: sql.Open without connection pool limit
   documentation:
     weight: 15
     score: 1
@@ -118,9 +176,9 @@ scores:
     applicable: false
     details: Fixture has no UI - points redistributed
 totals:
-  raw_score: 34.0
+  raw_score: 46.7
   max_possible: 85
-  weighted_score: 40.0
+  weighted_score: 54.9
   grade: F
 notes: ''
 recommendations: []

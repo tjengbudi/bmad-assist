@@ -30,9 +30,9 @@ from bmad_assist.core.state import Phase, State
 class TestPhaseEnum:
     """Test Phase enum values and ordering (AC2)."""
 
-    def test_phase_enum_has_seventeen_values(self) -> None:
-        """Phase enum contains exactly 17 workflow phases (including TEA handlers)."""
-        assert len(Phase) == 17
+    def test_phase_enum_has_eighteen_values(self) -> None:
+        """Phase enum contains exactly 18 workflow phases (including TEA handlers + QA)."""
+        assert len(Phase) == 18
 
     def test_phase_enum_values_in_order(self) -> None:
         """Phase enum values match expected order."""
@@ -54,6 +54,7 @@ class TestPhaseEnum:
             ("RETROSPECTIVE", "retrospective"),
             ("QA_PLAN_GENERATE", "qa_plan_generate"),
             ("QA_PLAN_EXECUTE", "qa_plan_execute"),
+            ("QA_REMEDIATE", "qa_remediate"),
         ]
         actual_order = [(p.name, p.value) for p in Phase]
         assert actual_order == expected_order
@@ -63,10 +64,10 @@ class TestPhaseEnum:
         assert Phase.CREATE_STORY.value == "create_story"
         assert list(Phase)[0] == Phase.CREATE_STORY
 
-    def test_phase_enum_qa_plan_execute(self) -> None:
-        """QA_PLAN_EXECUTE is last phase."""
-        assert Phase.QA_PLAN_EXECUTE.value == "qa_plan_execute"
-        assert list(Phase)[-1] == Phase.QA_PLAN_EXECUTE
+    def test_phase_enum_qa_remediate(self) -> None:
+        """QA_REMEDIATE is last phase."""
+        assert Phase.QA_REMEDIATE.value == "qa_remediate"
+        assert list(Phase)[-1] == Phase.QA_REMEDIATE
 
     def test_phase_can_be_accessed_by_name(self) -> None:
         """Phase enum members accessible by name."""

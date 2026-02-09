@@ -1,0 +1,152 @@
+fixture: webhook-relay-006
+generated_at: '2026-02-07T12:05:44.992083+00:00'
+generator_version: '2.0'
+mode: automated
+scores:
+  completeness:
+    weight: 25
+    score: 24.3
+    details:
+      test_to_code_ratio:
+        max: 10
+        score: 9.8
+        ratio: 1.97
+        test_sloc: 17750
+        prod_sloc: 9021
+      no_todos:
+        max: 5
+        score: 4.5
+        metric: 1
+        notes: internal/delivery/sender_metrics.go (1)
+      no_placeholders:
+        max: 5
+        score: 5
+        metric: 0
+        patterns_found: []
+      no_empty_files:
+        max: 5
+        score: 5
+        metric: 0
+  functionality:
+    weight: 25
+    score: 22.0
+    details:
+      build:
+        max: 10
+        score: 10
+        success: true
+        command: go build ./...
+        errors: []
+      unit_tests:
+        max: 10
+        score: 10.0
+        metric: 1404/1404
+        passed: 1404
+        failed: 0
+        skipped: 0
+        errors: []
+      behavior_tests:
+        max: 5
+        score: 2
+        metric: 0/0
+        passed: 0
+        failed: 0
+        notes: 2 test files found in webhook-relay/
+  code_quality:
+    weight: 20
+    score: 19.2
+    details:
+      linting:
+        max: 6
+        score: 6
+        tool: go vet
+        errors: 0
+        warnings: 0
+        top_issues: []
+      complexity:
+        max: 4
+        score: 4
+        tool: gocyclo
+        average: 2.69
+        max_function: ''
+        max_value: 0
+      security:
+        max: 4
+        score: 3.4
+        tool: gosec
+        high: 1
+        medium: 0
+        low: 5
+        issues: []
+        kloc: 9.0
+        weighted_per_kloc: 0.139
+        fp_downgraded: 1
+      test_pass_rate:
+        max: 3
+        score: 3.0
+        pass_rate: 1.0
+        source: functionality
+      code_maturity:
+        max: 3
+        score: 2.8
+        todos: 1
+        placeholders: 0
+      correctness_proxies:
+      - id: lock_no_defer
+        file: internal/delivery/retry_health_test.go
+        description: mutex locked without defer Unlock
+      - id: lock_no_defer
+        file: internal/delivery/fanout.go
+        description: mutex locked without defer Unlock
+      - id: goroutine_no_ctx
+        file: internal/delivery/health.go
+        description: goroutine launched without context propagation
+      - id: goroutine_no_ctx
+        file: internal/delivery/health_test.go
+        description: goroutine launched without context propagation
+  documentation:
+    weight: 15
+    score: 1
+    details:
+      readme_exists:
+        max: 4
+        score: 0
+        exists: false
+        length: 0
+      readme_sections:
+        max: 3
+        score: 0
+        has_install: false
+        has_usage: false
+        has_config: false
+      api_docs:
+        max: 4
+        score: 0
+        exists: false
+        format: ''
+        location: ''
+      inline_comments:
+        max: 4
+        score: 1
+        ratio: 5.5
+        sampled_files:
+        - internal/routing/destination_test.go
+        - internal/routing/router_destinations_test.go
+        - internal/routing/destination_header_test.go
+        - internal/routing/route_test.go
+        - internal/routing/router_benchmark_test.go
+  ui_ux:
+    weight: 15
+    score: null
+    applicable: false
+    details: Fixture has no UI - points redistributed
+totals:
+  raw_score: 66.5
+  max_possible: 85
+  weighted_score: 78.2
+  grade: C
+notes: ''
+recommendations: []
+comparison:
+  baseline_fixture: null
+  delta: {}

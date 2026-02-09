@@ -1,47 +1,47 @@
 # bmad-assist
 
-CLI tool for automating the [BMAD](https://github.com/bmad-code-org/BMAD-METHOD) development methodology with Multi-LLM orchestration.
+CLI tool that reads your project documentation (PRD, architecture, epics) and implements it story by story using multiple LLMs. Built on the [BMAD](https://github.com/bmad-code-org/BMAD-METHOD) methodology.
 
-## What is BMAD?
+## What does it do?
 
-BMAD (Breakthrough Method of Agile AI Driven Development) is a structured approach to software development that leverages AI assistants throughout the entire lifecycle.
+[BMAD](https://github.com/bmad-code-org/BMAD-METHOD) (Breakthrough Method of Agile AI Driven Development) structures AI-driven projects into docs: PRD, architecture, epics, and stories. bmad-assist uses BMAD workflows to produce code, adding multi-LLM orchestration, automated quality loops, and hands-free execution on top.
 
-**bmad-assist** automates the BMAD loop with Multi-LLM orchestration:
+You write the docs (or have AI help you write them with BMAD). bmad-assist reads them and runs an automated loop:
+
+1. **Creates** the next story from your epics
+2. **Validates** the story using multiple LLMs in parallel (catches issues a single LLM would miss)
+3. **Implements** the story - writes code, tests, updates files
+4. **Reviews** the code with multiple LLMs as adversarial reviewers
+5. **Pauses** between stories and epics to let you quit gracefully - or skip prompts with `--skip-story-prompts` / `-n`
+6. **Repeats** for every story in the epic, then runs a retrospective and moves to the next epic
+
+One LLM (Master) writes all code. The others only validate and review - they never touch your files.
 
 ```
-            ┌─────────────────┐
-            │  Create Story   │
-            │    (Master)     │
-            └────────┬────────┘
-                     │
-    ┌────────────────┼────────────────┐
-    ▼                ▼                ▼
-┌────────────┐ ┌────────────┐ ┌────────────┐
-│  Validate  │ │  Validate  │ │  Validate  │
-│  (Master)  │ │  (Gemini)  │ │  (Codex)   │
-└─────┬──────┘ └─────┬──────┘ └─────┬──────┘
-      └──────────────┼──────────────┘
-                     ▼
-            ┌─────────────────┐
-            │    Synthesis    │ ──► Dev Story ──► Code Review ──► Retrospective
-            │    (Master)     │
-            └─────────────────┘
+  Create Story ──► Validate (multi-LLM) ──► Synthesis ──► Dev Story ──► Code Review (multi-LLM) ──► Synthesis
+       │                                                                                                │
+       └────────────────────────────────── next story ◄─────────────────────────────────────────────────┘
 ```
-
-**Key insight:** Multiple LLMs validate/review in parallel, then Master synthesizes findings. Only Master modifies files.
 
 ## Features
 
 - **Multi-LLM Orchestration** - Claude Code, Gemini CLI, Codex, OpenCode, Amp, Cursor Agent, GitHub Copilot, Kimi CLI working in parallel
+- **A/B Testing** - Compare workflow configs, prompts, or model fleets side-by-side with git worktree isolation and LLM-powered analysis reports
+- **Security Review Agent** - Parallel CWE pattern analysis with tech stack detection, integrated into code review phase
+- **Deep Verify** - Multi-method artifact verification (pattern matching, boundary analysis, cross-reference checks)
+- **TEA Enterprise** - Test Architect with 8 workflows: framework setup, CI scaffolding, test design, ATDD, automation, NFR assessment, traceability, test review
 - **Bundled Workflows** - BMAD workflows included and ready to use out of the box
+- **Git Auto-commit** - Automatic commits after create-story, dev-story, and code-review-synthesis phases (`-g` flag)
+
+### Under the Hood
+
 - **Workflow Compiler** - Builds single comprehensive prompts with resolved variables and embedded context - minimizes tool usage and LLM turns
-- **Python State Tracking** - Deterministic sequencing maintains sprint status internally instead of relying on LLM inference
+- **AST-aware Truncation** - Intelligent file truncation based on code structure (classes, functions) to fit token budgets
 - **Evidence Score System** - Mathematical validation scoring with anti-bias checks for reliable quality assessment
 - **Antipatterns Module** - Learns from validation and code review findings, injects lessons into subsequent prompts to prevent recurring mistakes
 - **Strategic Context Loading** - Config-driven loading of PRD/Architecture per workflow with intelligent truncation to token limits
 - **Patch System** - Removes interactive elements from BMAD workflows for fully automated execution
-- **AST-aware Truncation** - Intelligent file truncation based on code structure (classes, functions) to fit token budgets
-- **Experiment Framework** - Benchmarking with fixture isolation and statistical comparisons (Mann-Whitney U, Cohen's d) for A/B testing
+- **Python State Tracking** - Deterministic sequencing maintains sprint status internally instead of relying on LLM inference
 
 ## Installation
 
@@ -81,23 +81,28 @@ bmad-assist run -p ./project              # Run BMAD loop
 bmad-assist run -e 5 -s 3                 # Start from epic 5, story 3
 bmad-assist run --phase dev_story         # Override starting phase
 
+# Useful flags
+bmad-assist run -g                        # Auto-commit after create/dev/synthesis phases
+bmad-assist run -n                        # Non-interactive (no prompts, fail if config missing)
+bmad-assist run --skip-story-prompts      # Skip prompts between stories (still prompt at epic boundaries)
+bmad-assist run -v                        # Verbose - show INFO-level logs (phase progress, providers)
+bmad-assist run --debug --full-stream     # Debug JSONL logging + full untruncated LLM output
+
+# Typical production run (-n implies --skip-story-prompts)
+bmad-assist run -g -n -v
+
 # Setup
 bmad-assist init -p ./project             # Initialize project
 bmad-assist init --reset-workflows        # Restore bundled workflows
-
-# Compilation
-bmad-assist compile -w dev-story -e 5 -s 3
-
-# Patches
-bmad-assist patch list
-bmad-assist patch compile-all
 
 # Sprint
 bmad-assist sprint generate
 bmad-assist sprint validate
 bmad-assist sprint sync
 
-# Experiments
+# A/B testing
+bmad-assist experiment ab experiments/ab-tests/prompt-v2-test.yaml        # Run A/B test from definition
+bmad-assist experiment ab-analysis experiments/ab-results/my-test-20260208  # Re-run LLM analysis on existing results
 bmad-assist test scorecard <fixture>      # Generate quality scorecard
 ```
 
@@ -123,7 +128,13 @@ timeouts:
 ## Documentation
 
 - [Configuration Reference](docs/configuration.md) - Providers, timeouts, paths, compiler settings
+- [Providers Guide](docs/providers.md) - Setting up Claude Code, Gemini CLI, Codex, and other LLM tools
+- [TEA Configuration](docs/tea-configuration.md) - Test Architect Enterprise switch hierarchy and modes
+- [A/B Testing](docs/ab-testing.md) - Running controlled experiments comparing workflow configurations
 - [Strategic Context](docs/strategic-context.md) - Smart document loading optimization
+- [Sprint Management](docs/sprint-management.md) - Sprint status tracking and story lifecycle
+- [Experiment Framework](docs/experiments.md) - Benchmarking with fixture isolation
+- [Workflow Patches](docs/workflow-patches.md) - Customizing BMAD workflows for automation
 - [Troubleshooting](docs/troubleshooting.md) - Common issues and solutions
 
 ## Workflow Architecture

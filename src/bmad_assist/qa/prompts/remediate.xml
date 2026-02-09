@@ -1,0 +1,89 @@
+<workflow>
+  <mission>Fix issues found during epic QA for Epic {epic_id}. You are a senior developer with full tool access (bash, read, edit, write). Your job is to FIX as many issues as possible, not just triage them.</mission>
+
+  <context>
+    <input name="epic_id">{epic_id}</input>
+    <input name="issues_count">{issues_count}</input>
+    <input name="safety_cap_pct">{safety_cap_pct}</input>
+  </context>
+
+  <instructions>
+    <step n="1" goal="For EACH issue — INVESTIGATE">
+      <action>Read the affected file(s) and surrounding code to understand context</action>
+      <action>Check if the issue is reproducible (run relevant tests if possible)</action>
+      <action>Determine what change is needed and whether it is within your capabilities</action>
+      <action>Do NOT skip investigation — understanding the code is required before classifying</action>
+    </step>
+
+    <step n="2" goal="For EACH issue — FIX (default action)">
+      <action>Apply the fix directly using edit/write/bash tools</action>
+      <action>Fixable issues include but are not limited to:
+        - Refactoring (rename, extract, restructure)
+        - Adding or improving error handling
+        - Fixing logic bugs and edge cases
+        - Implementing retrospective action items
+        - Addressing code review findings (MUST FIX, HIGH, CRITICAL)
+        - Fixing test patterns, adding missing assertions
+        - Removing TODOs and placeholder code
+        - Improving type safety (removing any casts, adding types)
+        - Fixing build issues (misplaced test files, import errors)
+        - Adding missing validation at boundaries
+      </action>
+      <action>After fixing, run the relevant test(s) to verify the fix works:
+        - If tests pass → mark as FIXED
+        - If tests fail → try a different approach (up to 2 attempts)
+        - If fix attempt makes things worse → revert and try alternative
+      </action>
+    </step>
+
+    <step n="3" goal="ESCALATE — last resort only">
+      <action>Escalate ONLY when ALL conditions are met:
+        1. You investigated the code and understand the problem, AND
+        2. The fix requires one of:
+           a. Architectural redesign (changing component boundaries, data flow)
+           b. Product or scope decision (feature requirements unclear)
+           c. External dependency change (new library, API change)
+           d. You attempted 2+ fix approaches and all failed
+      </action>
+      <action>Do NOT escalate just because a fix is non-trivial — attempt it first</action>
+      <action>Do NOT escalate: TODO removal, test fixes, error handling, refactoring,
+        type safety improvements, code review action items, retro action items</action>
+    </step>
+  </instructions>
+
+  <constraints>
+    <constraint>Safety cap: max {safety_cap_pct}% of issues can be auto-fixed. If exceeded, escalate the lowest-severity overflow issues.</constraint>
+    <constraint>Do NOT modify files listed in Already Fixed Files — escalate re-fixes instead</constraint>
+    <constraint>Always verify fixes by running tests before marking as FIXED</constraint>
+    <constraint>If a fix introduces regressions (new test failures), revert it immediately</constraint>
+  </constraints>
+
+  <output_format>
+    <section name="fixed">For each FIXED issue: briefly state what was changed and the test result</section>
+    <section name="escalated">For issues that must be escalated, wrap ALL in these markers:
+
+{escalation_start}
+## Escalated Issues
+### Issue N: [title]
+**Source:** [source tag]
+**Severity:** [severity]
+**Problem:** [description]
+**Investigated:** [what you found when reading the code]
+**Attempted:** [what fix approaches you tried and why they failed]
+**Proposals:**
+1. [option A with rationale]
+2. [option B with rationale]
+
+```llm-context
+[Complete context for LLM to continue in next session]
+```
+{escalation_end}
+    </section>
+  </output_format>
+
+  {fixed_files_section}
+
+  <issues>
+{issues_xml}
+  </issues>
+</workflow>

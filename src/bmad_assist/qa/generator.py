@@ -252,6 +252,40 @@ def _load_ux_elements(project_path: Path) -> str:
     return combined
 
 
+def _load_retro_context(project_path: Path, epic_id: EpicId) -> str:
+    """Load retrospective report for the epic (if exists).
+
+    Args:
+        project_path: Project root.
+        epic_id: Epic identifier.
+
+    Returns:
+        Retro content string, or empty string if not found.
+
+    """
+    retro_dir = project_path / "_bmad-output" / "implementation-artifacts" / "retrospectives"
+    if not retro_dir.exists():
+        return ""
+
+    pattern = f"epic-{epic_id}-retro*.md"
+    files = sorted(retro_dir.glob(pattern))
+    if not files:
+        return ""
+
+    latest = files[-1]
+    try:
+        content = latest.read_text(encoding="utf-8")
+    except OSError as e:
+        logger.warning("Failed to load retro file %s: %s", latest, e)
+        return ""
+
+    if len(content) > 8000:
+        content = content[:8000] + "\n\n[TRUNCATED]"
+
+    logger.info("Loaded retro context: %s (%d chars)", latest.name, len(content))
+    return content
+
+
 def _build_qa_plan_prompt(
     config: Config,  # noqa: ARG001 - kept for API compatibility
     project_path: Path,
@@ -316,6 +350,9 @@ def _build_qa_plan_prompt(
 
     # Load FR/NFR from PRD for requirement traceability
     requirements = _load_requirements(project_path)
+
+    # Load retrospective findings (if exists) for issue regression checks
+    retro_content = _load_retro_context(project_path, epic_id)
 
     # Build UX elements section for prompt - HIGHEST PRIORITY SECTION
     ux_section = ""
@@ -387,6 +424,8 @@ This must be a COMPLETE test plan with ACTUAL test code, not just a summary.
 
 ## Requirements from PRD (for Traceability)
 {requirements if requirements else "No PRD requirements found. Map tests to story AC instead."}
+
+{"## Retrospective Findings (from previous epic review)" + chr(10) + retro_content + chr(10) + chr(10) + "Use these findings to:" + chr(10) + "- Generate tests that verify action items were addressed" + chr(10) + "- Check for regressions in areas mentioned in the retro" + chr(10) + "- Include tests for issues that were flagged but not fully resolved" if retro_content else ""}
 
 ## Traceability Data
 {trace_content[:15000] if trace_content else "No traceability data available."}

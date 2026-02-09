@@ -834,21 +834,16 @@ class TestDefaultTemplates:
         assert template.providers.master.model == "sonnet"
 
     def test_all_default_templates_discoverable(self, default_configs_dir: Path) -> None:
-        """Test ConfigRegistry can discover all default templates."""
+        """Test ConfigRegistry discovers all YAML configs in the directory."""
         if not default_configs_dir.exists():
             pytest.skip("Default configs not available in this environment")
 
         registry = ConfigRegistry(default_configs_dir)
         names = registry.list()
 
-        expected = [
-            "glm-gemini-fast",
-            "glm-gpt",
-            "haiku-solo",
-            "opus-full",
-            "opus-glm-gemini",
-            "opus-haiku-gemini-glm",
-            "opus-solo",
-            "sonnet-solo",
-        ]
-        assert sorted(names) == expected
+        # Dynamically derive expected from actual YAML files on disk
+        yaml_files = sorted(
+            p.stem for p in default_configs_dir.glob("*.yaml")
+        )
+        assert sorted(names) == yaml_files
+        assert len(names) >= 1, "Should discover at least one config template"

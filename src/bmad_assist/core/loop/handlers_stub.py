@@ -23,6 +23,7 @@ __all__ = [
     "trace_handler",
     "tea_nfr_assess_handler",
     "retrospective_handler",
+    "qa_remediate_handler",
     "WORKFLOW_HANDLERS",
 ]
 
@@ -362,6 +363,26 @@ def qa_plan_execute_handler(state: State) -> PhaseResult:
     )
 
 
+def qa_remediate_handler(state: State) -> PhaseResult:
+    """Handle the QA_REMEDIATE phase.
+
+    Collects epic issues and auto-fixes or escalates them.
+
+    Args:
+        state: Current loop state after QA plan execution.
+
+    Returns:
+        PhaseResult with remediation summary in outputs.
+
+    Note:
+        Stub implementation.
+
+    """
+    return PhaseResult.fail(
+        f"Handler for {Phase.QA_REMEDIATE.value} not yet implemented"
+    )
+
+
 # =============================================================================
 # WORKFLOW_HANDLERS Mapping - Story 6.1
 # =============================================================================
@@ -384,4 +405,5 @@ WORKFLOW_HANDLERS: dict[Phase, PhaseHandler] = {
     Phase.RETROSPECTIVE: retrospective_handler,
     Phase.QA_PLAN_GENERATE: qa_plan_generate_handler,
     Phase.QA_PLAN_EXECUTE: qa_plan_execute_handler,
+    Phase.QA_REMEDIATE: qa_remediate_handler,
 }

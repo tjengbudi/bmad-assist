@@ -150,6 +150,7 @@ PHASE_TO_STATUS: dict[Phase, ValidStatus] = {
     # QA phases (experimental): stories already done at this point
     Phase.QA_PLAN_GENERATE: "done",
     Phase.QA_PLAN_EXECUTE: "done",
+    Phase.QA_REMEDIATE: "done",
 }
 """Mapping from workflow Phase to sprint-status ValidStatus.
 
@@ -530,9 +531,9 @@ def trigger_sync(state: State, project_root: Path) -> SyncResult:
         # Safety check: if file has content but parser returned empty, don't overwrite
         # This prevents data loss on corrupted files
         if not sprint_status.entries and sprint_path.stat().st_size > 0:
-            logger.error(
+            logger.warning(
                 "Sprint-status file appears corrupted (has content but no entries parsed). "
-                "Aborting sync to prevent data loss: %s",
+                "Skipping sync to prevent data loss: %s",
                 sprint_path,
             )
             return SyncResult(errors=(f"Corrupted file: {sprint_path}",))

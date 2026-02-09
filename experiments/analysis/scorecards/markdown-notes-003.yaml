@@ -1,0 +1,258 @@
+fixture: markdown-notes-003
+generated_at: '2026-02-08T19:17:33.205232+00:00'
+generator_version: '2.0'
+mode: automated
+scores:
+  completeness:
+    weight: 25
+    score: 18.7
+    details:
+      test_to_code_ratio:
+        max: 10
+        score: 6.7
+        ratio: 1.34
+        test_sloc: 7655
+        prod_sloc: 5729
+      no_todos:
+        max: 5
+        score: 3.0
+        metric: 4
+        notes: src/lib/markdown/parser.test.ts (1); src/lib/components/Sidebar.svelte
+          (1); src/routes/api/export/bulk/+server.test.ts (2)
+      no_placeholders:
+        max: 5
+        score: 4
+        metric: 1
+        patterns_found:
+        - TODO comment
+      no_empty_files:
+        max: 5
+        score: 5
+        metric: 0
+  functionality:
+    weight: 25
+    score: 4.0
+    details:
+      build:
+        max: 10
+        score: 0
+        success: false
+        command: npm run build
+        errors:
+        - 'error during build:'
+        - 'Error: Files prefixed with + are reserved (saw src/routes/api/export/bulk/+server.test.ts)'
+        - '    at analyze (file:///home/pawel/projects/bmad-assist-22/experiments/fixtures/markdown-notes-003/node_modules/@sveltejs/kit/src/core/sync/create_manifest_data/index.js:501:10)'
+        - '    at walk (file:///home/pawel/projects/bmad-assist-22/experiments/fixtures/markdown-notes-003/node_modules/@sveltejs/kit/src/core/sync/create_manifest_data/index.js:267:18)'
+        - '    at walk (file:///home/pawel/projects/bmad-assist-22/experiments/fixtures/markdown-notes-003/node_modules/@sveltejs/kit/src/core/sync/create_manifest_data/index.js:353:6)'
+      unit_tests:
+        max: 10.0
+        score: 4.0
+        skipped: true
+        partial: true
+        tool: tests
+        warning: no tests collected (0 passed, 0 failed)
+      behavior_tests:
+        max: 5
+        score: 0
+        metric: 0/0
+        passed: 0
+        failed: 0
+        notes: ''
+  code_quality:
+    weight: 20
+    score: 8.1
+    details:
+      linting:
+        max: 6
+        score: 2.4
+        skipped: true
+        partial: true
+        tool: eslint
+        warning: eslint not available
+      complexity:
+        max: 4
+        score: 0
+        tool: none
+        not_measured: true
+        reason: no reliable TypeScript complexity tool available
+      security:
+        max: 4
+        score: 3.9
+        tool: npm_audit
+        high: 0
+        medium: 0
+        low: 3
+        issues: []
+        kloc: 5.7
+        weighted_per_kloc: 0.026
+      test_pass_rate:
+        max: 3
+        score: 0
+        pass_rate: 0.0
+        source: functionality
+      code_maturity:
+        max: 3
+        score: 1.8
+        todos: 4
+        placeholders: 1
+      correctness_proxies:
+      - id: any_cast
+        file: src/lib/utils/debounce.ts
+        description: TypeScript 'any' type usage (bypasses type safety)
+      - id: console_log
+        file: src/lib/markdown/parser.test.ts
+        description: console.log left in production code
+      - id: any_cast
+        file: src/routes/api/tags/+server.test.ts
+        description: TypeScript 'any' type usage (bypasses type safety)
+      - id: any_cast
+        file: src/routes/api/search/+server.test.ts
+        description: TypeScript 'any' type usage (bypasses type safety)
+      - id: any_cast
+        file: src/routes/api/import/+server.test.ts
+        description: TypeScript 'any' type usage (bypasses type safety)
+      - id: any_cast
+        file: src/routes/api/import/+server.test.ts
+        description: TypeScript 'any' type usage (bypasses type safety)
+      - id: any_cast
+        file: src/routes/api/import/+server.test.ts
+        description: TypeScript 'any' type usage (bypasses type safety)
+      - id: any_cast
+        file: src/routes/api/export/bulk/+server.test.ts
+        description: TypeScript 'any' type usage (bypasses type safety)
+      - id: any_cast
+        file: src/routes/api/notes/+server.test.ts
+        description: TypeScript 'any' type usage (bypasses type safety)
+      - id: any_cast
+        file: src/routes/api/notes/[id]/tags/+server.test.ts
+        description: TypeScript 'any' type usage (bypasses type safety)
+      - id: any_cast
+        file: src/routes/api/notes/[id]/tags/+server.test.ts
+        description: TypeScript 'any' type usage (bypasses type safety)
+      - id: any_cast
+        file: src/routes/api/notes/[id]/tags/+server.test.ts
+        description: TypeScript 'any' type usage (bypasses type safety)
+      - id: any_cast
+        file: src/routes/api/notes/[id]/tags/+server.test.ts
+        description: TypeScript 'any' type usage (bypasses type safety)
+      - id: any_cast
+        file: src/routes/api/notes/[id]/tags/+server.test.ts
+        description: TypeScript 'any' type usage (bypasses type safety)
+      - id: any_cast
+        file: src/routes/api/notes/[id]/tags/+server.test.ts
+        description: TypeScript 'any' type usage (bypasses type safety)
+      - id: any_cast
+        file: src/routes/api/notes/[id]/tags/+server.test.ts
+        description: TypeScript 'any' type usage (bypasses type safety)
+      - id: any_cast
+        file: src/routes/api/notes/[id]/tags/+server.test.ts
+        description: TypeScript 'any' type usage (bypasses type safety)
+      - id: any_cast
+        file: src/routes/api/notes/[id]/tags/+server.test.ts
+        description: TypeScript 'any' type usage (bypasses type safety)
+      - id: any_cast
+        file: src/routes/api/notes/[id]/tags/+server.test.ts
+        description: TypeScript 'any' type usage (bypasses type safety)
+      - id: any_cast
+        file: src/routes/api/notes/[id]/tags/+server.test.ts
+        description: TypeScript 'any' type usage (bypasses type safety)
+      - id: any_cast
+        file: src/routes/api/notes/[id]/tags/+server.test.ts
+        description: TypeScript 'any' type usage (bypasses type safety)
+      - id: any_cast
+        file: src/routes/api/notes/[id]/tags/+server.test.ts
+        description: TypeScript 'any' type usage (bypasses type safety)
+      - id: any_cast
+        file: src/routes/api/notes/[id]/tags/+server.test.ts
+        description: TypeScript 'any' type usage (bypasses type safety)
+      - id: any_cast
+        file: src/routes/api/notes/[id]/tags/+server.test.ts
+        description: TypeScript 'any' type usage (bypasses type safety)
+      - id: any_cast
+        file: src/routes/api/notes/[id]/tags/+server.test.ts
+        description: TypeScript 'any' type usage (bypasses type safety)
+      - id: any_cast
+        file: src/routes/api/notes/[id]/tags/+server.test.ts
+        description: TypeScript 'any' type usage (bypasses type safety)
+      - id: any_cast
+        file: src/routes/api/notes/[id]/tags/+server.test.ts
+        description: TypeScript 'any' type usage (bypasses type safety)
+      - id: any_cast
+        file: src/routes/api/notes/[id]/tags/+server.test.ts
+        description: TypeScript 'any' type usage (bypasses type safety)
+      - id: any_cast
+        file: src/routes/api/notes/[id]/tags/+server.test.ts
+        description: TypeScript 'any' type usage (bypasses type safety)
+      - id: any_cast
+        file: src/routes/api/notes/[id]/tags/+server.test.ts
+        description: TypeScript 'any' type usage (bypasses type safety)
+      - id: any_cast
+        file: src/routes/api/notes/[id]/tags/+server.test.ts
+        description: TypeScript 'any' type usage (bypasses type safety)
+      - id: any_cast
+        file: src/routes/api/notes/[id]/tags/[tagId]/+server.test.ts
+        description: TypeScript 'any' type usage (bypasses type safety)
+      - id: any_cast
+        file: src/routes/api/notes/[id]/tags/[tagId]/+server.test.ts
+        description: TypeScript 'any' type usage (bypasses type safety)
+      - id: any_cast
+        file: src/routes/api/notes/[id]/tags/[tagId]/+server.test.ts
+        description: TypeScript 'any' type usage (bypasses type safety)
+      - id: any_cast
+        file: src/routes/api/notes/[id]/tags/[tagId]/+server.test.ts
+        description: TypeScript 'any' type usage (bypasses type safety)
+      - id: any_cast
+        file: src/routes/api/notes/[id]/tags/[tagId]/+server.test.ts
+        description: TypeScript 'any' type usage (bypasses type safety)
+      - id: any_cast
+        file: src/routes/api/notes/[id]/tags/[tagId]/+server.test.ts
+        description: TypeScript 'any' type usage (bypasses type safety)
+      - id: any_cast
+        file: src/routes/api/notes/[id]/tags/[tagId]/+server.test.ts
+        description: TypeScript 'any' type usage (bypasses type safety)
+  documentation:
+    weight: 15
+    score: 0
+    details:
+      readme_exists:
+        max: 4
+        score: 0
+        exists: false
+        length: 0
+      readme_sections:
+        max: 3
+        score: 0
+        has_install: false
+        has_usage: false
+        has_config: false
+      api_docs:
+        max: 4
+        score: 0
+        exists: false
+        format: ''
+        location: ''
+      inline_comments:
+        max: 4
+        score: 0
+        ratio: 1.6
+        sampled_files:
+        - src/app.d.ts
+        - src/lib/types.ts
+        - src/lib/utils/sanitize-filename.test.ts
+        - src/lib/utils/debounce.ts
+        - src/lib/utils/frontmatter.test.ts
+  ui_ux:
+    weight: 15
+    score: null
+    applicable: false
+    details: Fixture has no UI - points redistributed
+totals:
+  raw_score: 30.8
+  max_possible: 85
+  weighted_score: 36.2
+  grade: F
+notes: ''
+recommendations: []
+comparison:
+  baseline_fixture: null
+  delta: {}

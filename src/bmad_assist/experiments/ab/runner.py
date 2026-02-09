@@ -262,6 +262,7 @@ class ABTestRunner:
                     analysis_path = generate_ab_analysis(
                         config=config,
                         result_dir=result_dir,
+                        experiments_dir=self._experiments_dir,
                     )
                 except Exception:
                     logger.exception("Analysis generation failed")
@@ -443,6 +444,39 @@ class ABTestRunner:
                 epic_id = parse_epic_id(epic_part)
                 stories_by_epic.setdefault(epic_id, []).append(story_ref)
 
+            # Gate AB phases through variant's loop config (if defined).
+            # When a variant's config has a `loop:` section, only phases
+            # present in that loop config are executed. This lets variants
+            # differ in which phases run (e.g., QA phases in one, not other).
+            effective_phases = list(config.phases)
+            loop_data = config_dict.get("loop")
+            if loop_data and isinstance(loop_data, dict):
+                try:
+                    from bmad_assist.core.config.models.loop import LoopConfig as LoopModel
+
+                    variant_loop = LoopModel.model_validate(loop_data)
+                    allowed = set(
+                        variant_loop.epic_setup
+                        + variant_loop.story
+                        + variant_loop.epic_teardown
+                    )
+                    filtered = [p for p in config.phases if p in allowed]
+                    if len(filtered) < len(config.phases):
+                        skipped = [p for p in config.phases if p not in allowed]
+                        logger.info(
+                            "[%s] Loop config gates phases: running %s, skipped %s",
+                            variant_label,
+                            filtered,
+                            skipped,
+                        )
+                    effective_phases = filtered
+                except Exception as e:
+                    logger.warning(
+                        "[%s] Failed to parse loop config for phase gating: %s",
+                        variant_label,
+                        e,
+                    )
+
             # Execute stories with per-story ref checkout and snapshots
             is_first_story = True
             for epic_id, epic_stories in stories_by_epic.items():
@@ -477,7 +511,7 @@ class ABTestRunner:
                         story_ref.ref,
                     )
 
-                    for phase_name in config.phases:
+                    for phase_name in effective_phases:
                         if shutdown_requested():
                             break
 
@@ -692,18 +726,12 @@ class ABTestRunner:
         import subprocess
         import sys
 
-        scorecard_script = (
-            self._experiments_dir / "testing-framework" / "common" / "scorecard.py"
-        )
-        if not scorecard_script.exists():
-            logger.warning("Scorecard script not found: %s", scorecard_script)
-            return None
-
         try:
             result = subprocess.run(
                 [
                     sys.executable,
-                    str(scorecard_script),
+                    "-m",
+                    "bmad_assist.experiments.testing.scorecard",
                     str(worktree_path),
                     "--output",
                     str(output_path),
@@ -726,7 +754,11 @@ class ABTestRunner:
     def _collect_worktree_files(self, worktree_path: Path) -> set[str]:
         """Collect all file paths in artifact and runtime directories."""
         files: set[str] = set()
-        for base in ("_bmad-output/implementation-artifacts", ".bmad-assist"):
+        for base in (
+            "_bmad-output/implementation-artifacts",
+            "_bmad-output/qa-artifacts",
+            ".bmad-assist",
+        ):
             base_path = worktree_path / base
             if base_path.is_dir():
                 for f in base_path.rglob("*"):
@@ -754,6 +786,8 @@ class ABTestRunner:
         for rel_path in sorted(new_files):
             if rel_path.startswith("_bmad-output/implementation-artifacts/"):
                 dest_rel = "artifacts/" + rel_path[len("_bmad-output/implementation-artifacts/"):]
+            elif rel_path.startswith("_bmad-output/qa-artifacts/"):
+                dest_rel = "qa-artifacts/" + rel_path[len("_bmad-output/qa-artifacts/"):]
             elif rel_path.startswith(".bmad-assist/"):
                 suffix = rel_path[len(".bmad-assist/"):]
                 if suffix.endswith(".tpl.xml") or suffix.endswith(".tpl.xml.meta.yaml"):

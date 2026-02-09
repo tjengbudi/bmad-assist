@@ -95,9 +95,16 @@ class WorkflowStatusData(BaseModel):
         "CODE_REVIEW",
         "CODE_REVIEW_SYNTHESIS",
         "TEST_REVIEW",
+        "TEA_FRAMEWORK",
+        "TEA_CI",
+        "TEA_TEST_DESIGN",
+        "TEA_AUTOMATE",
+        "TRACE",
+        "TEA_NFR_ASSESS",
         "RETROSPECTIVE",
         "QA_PLAN_GENERATE",
         "QA_PLAN_EXECUTE",
+        "QA_REMEDIATE",
     ]
     phase_status: Literal["pending", "in-progress", "completed", "failed"]
 

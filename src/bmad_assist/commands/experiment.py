@@ -1118,3 +1118,92 @@ def experiment_ab(
         _success("A/B test completed successfully")
     else:
         raise typer.Exit(code=EXIT_ERROR)
+
+
+@experiment_app.command("ab-analysis")
+def experiment_ab_analysis(
+    result_dir: str = typer.Argument(
+        ...,
+        help="Path to A/B test result directory (contains test-definition.yaml)",
+    ),
+    project: str = typer.Option(
+        ".",
+        "--project",
+        "-p",
+        help="Path to project directory",
+    ),
+    verbose: bool = typer.Option(
+        False,
+        "--verbose",
+        "-v",
+        help="Enable verbose output",
+    ),
+) -> None:
+    """Re-run LLM analysis on existing A/B test results.
+
+    Loads the test definition from the result directory and generates
+    a new analysis.md using the master LLM from the variant A config.
+
+    Examples:
+        bmad-assist experiment ab-analysis experiments/ab-results/my-test-20260208-082603
+        bmad-assist experiment ab-analysis ./experiments/ab-results/my-test -p /path/to/project
+
+    """
+    from bmad_assist.experiments.ab import load_ab_test_config
+    from bmad_assist.experiments.ab.analysis import generate_ab_analysis
+
+    _setup_logging(verbose=verbose, quiet=False)
+    project_path = _validate_project_path(project)
+    experiments_dir = _get_experiments_dir(project_path)
+
+    result_path = Path(result_dir)
+    if not result_path.is_absolute():
+        result_path = project_path / result_path
+
+    # Validate result directory
+    if not result_path.is_dir():
+        _error(f"Result directory not found: {result_path}")
+        raise typer.Exit(code=EXIT_ERROR)
+
+    test_def_path = result_path / "test-definition.yaml"
+    if not test_def_path.exists():
+        _error(f"test-definition.yaml not found in {result_path}")
+        raise typer.Exit(code=EXIT_ERROR)
+
+    # Load A/B test config from saved definition
+    try:
+        config = load_ab_test_config(test_def_path)
+    except ConfigError as e:
+        _error(str(e))
+        raise typer.Exit(code=EXIT_CONFIG_ERROR) from None
+
+    # Check comparison exists (analysis needs it)
+    comparison_path = result_path / "comparison.md"
+    if not comparison_path.exists():
+        _warning("comparison.md not found — analysis may be incomplete")
+
+    console.print(f"[bold]A/B Analysis: {config.name}[/bold]")
+    console.print(f"  Result dir: {result_path}")
+    console.print(f"  Config (variant A): {config.variant_a.config}")
+    console.print()
+
+    try:
+        analysis_path = generate_ab_analysis(
+            config=config,
+            result_dir=result_path,
+            experiments_dir=experiments_dir,
+        )
+    except ConfigError as e:
+        _error(str(e))
+        raise typer.Exit(code=EXIT_CONFIG_ERROR) from None
+    except Exception as e:
+        _error(f"Analysis generation failed: {e}")
+        if verbose:
+            console.print_exception()
+        raise typer.Exit(code=EXIT_ERROR) from None
+
+    if analysis_path is not None:
+        _success(f"Analysis written: {analysis_path}")
+    else:
+        _error("Analysis returned no output (empty artifacts or LLM failure)")
+        raise typer.Exit(code=EXIT_ERROR)

@@ -126,6 +126,7 @@ class Phase(Enum):
         13. RETROSPECTIVE - Epic retrospective (after last story in epic)
         14. QA_PLAN_GENERATE - Generate E2E test plan for epic
         15. QA_PLAN_EXECUTE - Execute E2E tests for epic
+        16. QA_REMEDIATE - Collect epic issues and auto-fix or escalate
 
     The phase ordering enables workflow orchestration in Epic 6.
 
@@ -154,6 +155,7 @@ class Phase(Enum):
         RETROSPECTIVE: Epic retrospective phase (after last story in epic).
         QA_PLAN_GENERATE: Generate E2E test plan for completed epic.
         QA_PLAN_EXECUTE: Execute E2E tests using generated test plan.
+        QA_REMEDIATE: Collect epic issues from multiple sources and auto-fix or escalate.
 
     """
 
@@ -174,6 +176,7 @@ class Phase(Enum):
     RETROSPECTIVE = "retrospective"
     QA_PLAN_GENERATE = "qa_plan_generate"
     QA_PLAN_EXECUTE = "qa_plan_execute"
+    QA_REMEDIATE = "qa_remediate"
 
 
 class PreflightStateEntry(BaseModel):

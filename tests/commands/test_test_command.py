@@ -153,12 +153,9 @@ class TestScorecardSubprocessMock:
 
     def test_scorecard_command_construction(self, tmp_path: Path) -> None:
         """Test that scorecard builds correct subprocess command."""
-        # Setup fixture and script paths
+        # Setup fixture path only (no scorecard script needed with -m invocation)
         fixtures_dir = tmp_path / "experiments" / "fixtures"
         (fixtures_dir / "test-fixture").mkdir(parents=True)
-        script_dir = tmp_path / "experiments" / "testing-framework" / "common"
-        script_dir.mkdir(parents=True)
-        (script_dir / "scorecard.py").write_text("# mock script")
 
         mock_result = MagicMock()
         mock_result.returncode = 0
@@ -175,9 +172,10 @@ class TestScorecardSubprocessMock:
             mock_run.assert_called_once()
             call_args = mock_run.call_args
             cmd = call_args[0][0]
-            # Verify command structure
-            assert "scorecard.py" in cmd[1]
-            assert cmd[2] == "test-fixture"
+            # Verify -m invocation with module path
+            assert cmd[1] == "-m"
+            assert cmd[2] == "bmad_assist.experiments.testing.scorecard"
+            assert cmd[3] == "test-fixture"
             # Verify cwd is set correctly
             assert call_args[1]["cwd"] == tmp_path
 
@@ -187,9 +185,6 @@ class TestScorecardSubprocessMock:
 
         fixtures_dir = tmp_path / "experiments" / "fixtures"
         (fixtures_dir / "test-fixture").mkdir(parents=True)
-        script_dir = tmp_path / "experiments" / "testing-framework" / "common"
-        script_dir.mkdir(parents=True)
-        (script_dir / "scorecard.py").write_text("# mock script")
 
         with patch(
             "bmad_assist.commands.test.subprocess.run",
@@ -212,9 +207,6 @@ class TestCompareSubprocessMock:
         fixtures_dir = tmp_path / "experiments" / "fixtures"
         (fixtures_dir / "fixture1").mkdir(parents=True)
         (fixtures_dir / "fixture2").mkdir(parents=True)
-        script_dir = tmp_path / "experiments" / "testing-framework" / "common"
-        script_dir.mkdir(parents=True)
-        (script_dir / "scorecard.py").write_text("# mock script")
 
         mock_result = MagicMock()
         mock_result.returncode = 0
@@ -231,6 +223,9 @@ class TestCompareSubprocessMock:
             mock_run.assert_called_once()
             call_args = mock_run.call_args
             cmd = call_args[0][0]
+            # Verify -m invocation with module path
+            assert cmd[1] == "-m"
+            assert cmd[2] == "bmad_assist.experiments.testing.scorecard"
             # Verify command includes --compare flag
             assert "--compare" in cmd
             assert "fixture1" in cmd

@@ -1,0 +1,159 @@
+fixture: webhook-relay-007
+generated_at: '2026-02-07T12:07:29.313339+00:00'
+generator_version: '2.0'
+mode: automated
+scores:
+  completeness:
+    weight: 25
+    score: 21.4
+    details:
+      test_to_code_ratio:
+        max: 10
+        score: 9.4
+        ratio: 1.87
+        test_sloc: 13945
+        prod_sloc: 7477
+      no_todos:
+        max: 5
+        score: 4.0
+        metric: 2
+        notes: internal/delivery/retry.go (1); internal/delivery/fanout.go (1)
+      no_placeholders:
+        max: 5
+        score: 3
+        metric: 2
+        patterns_found:
+        - TODO comment
+      no_empty_files:
+        max: 5
+        score: 5
+        metric: 0
+  functionality:
+    weight: 25
+    score: 21.9
+    details:
+      build:
+        max: 10
+        score: 10
+        success: true
+        command: go build ./...
+        errors: []
+      unit_tests:
+        max: 10
+        score: 9.9
+        metric: 1009/1015
+        passed: 1009
+        failed: 6
+        skipped: 3
+        errors: []
+      behavior_tests:
+        max: 5
+        score: 2
+        metric: 0/0
+        passed: 0
+        failed: 0
+        notes: 2 test files found in webhook-relay/
+  code_quality:
+    weight: 20
+    score: 18.8
+    details:
+      linting:
+        max: 6
+        score: 6
+        tool: go vet
+        errors: 0
+        warnings: 0
+        top_issues: []
+      complexity:
+        max: 4
+        score: 4
+        tool: gocyclo
+        average: 3.14
+        max_function: ''
+        max_value: 0
+      security:
+        max: 4
+        score: 3.8
+        tool: gosec
+        high: 0
+        medium: 0
+        low: 9
+        issues: []
+        kloc: 7.5
+        weighted_per_kloc: 0.06
+        fp_downgraded: 2
+      test_pass_rate:
+        max: 3
+        score: 3.0
+        pass_rate: 0.9941
+        source: functionality
+      code_maturity:
+        max: 3
+        score: 2.0
+        todos: 2
+        placeholders: 2
+      correctness_proxies:
+      - id: lock_no_defer
+        file: internal/delivery/fanout_test.go
+        description: mutex locked without defer Unlock
+      - id: lock_no_defer
+        file: internal/delivery/fanout.go
+        description: mutex locked without defer Unlock
+      - id: goroutine_no_ctx
+        file: internal/delivery/health.go
+        description: goroutine launched without context propagation
+      - id: goroutine_no_ctx
+        file: internal/delivery/health_test.go
+        description: goroutine launched without context propagation
+      - id: sql_no_pool_limit
+        file: internal/delivery/dlq_replay_test.go
+        description: sql.Open without connection pool limit
+      - id: sql_no_pool_limit
+        file: internal/storage/queue_test.go
+        description: sql.Open without connection pool limit
+  documentation:
+    weight: 15
+    score: 1
+    details:
+      readme_exists:
+        max: 4
+        score: 0
+        exists: false
+        length: 0
+      readme_sections:
+        max: 3
+        score: 0
+        has_install: false
+        has_usage: false
+        has_config: false
+      api_docs:
+        max: 4
+        score: 0
+        exists: false
+        format: ''
+        location: ''
+      inline_comments:
+        max: 4
+        score: 1
+        ratio: 8.6
+        sampled_files:
+        - internal/routing/destination_test.go
+        - internal/routing/pipeline_builder_test.go
+        - internal/routing/route_test.go
+        - internal/routing/error_handler.go
+        - internal/routing/router_test.go
+  ui_ux:
+    weight: 15
+    score: null
+    applicable: false
+    details: Fixture has no UI - points redistributed
+totals:
+  raw_score: 63.099999999999994
+  max_possible: 85
+  weighted_score: 74.2
+  grade: C
+notes: ''
+recommendations: []
+comparison:
+  baseline_fixture: null
+  delta: {}

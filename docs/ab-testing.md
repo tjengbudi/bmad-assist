@@ -70,7 +70,7 @@ analysis: false                     # Optional LLM analysis report (default: fal
 | `variant_a` | Yes | Baseline variant configuration |
 | `variant_b` | Yes | Experimental variant configuration |
 | `scorecard` | No | Run quality scorecard after completion (default: `false`) |
-| `analysis` | No | Generate LLM-powered analysis report (default: `false`, **WIP**) |
+| `analysis` | No | Generate LLM-powered analysis report (default: `false`) |
 
 ### Story Fields
 
@@ -304,6 +304,29 @@ bmad-assist experiment ab my-test.yaml -p ./my-project -v
 | `1` | Runtime error or variant failure |
 | `2` | Configuration error (missing template, invalid YAML) |
 
+### Re-run Analysis
+
+Re-run LLM analysis on existing A/B test results without re-executing the test:
+
+```bash
+bmad-assist experiment ab-analysis <result-dir> [options]
+```
+
+| Argument | Description |
+|----------|-------------|
+| `result-dir` | Path to A/B test result directory (must contain `test-definition.yaml`) |
+
+| Flag | Type | Default | Description |
+|------|------|---------|-------------|
+| `-p`, `--project` | path | `.` | Project directory (used to locate `experiments/configs/`) |
+| `-v`, `--verbose` | flag | false | Enable verbose output |
+
+The command loads the config singleton from variant A's config template and invokes the master LLM. This is useful for re-generating analysis after fixing prompts or when the original run's analysis failed due to singleton reset.
+
+```bash
+bmad-assist experiment ab-analysis experiments/ab-results/agents-team-cr-001-20260208-082603
+```
+
 ### Dry Run
 
 Dry run validates the complete test configuration without executing any phases:
@@ -446,7 +469,7 @@ Example delta output:
 | Duration | 142.5s | 98.3s | -44.2s (-31.0%) |
 ```
 
-### Analysis Report (WIP)
+### Analysis Report
 
 When `analysis: true`, an LLM-powered analysis report (`analysis.md`) is generated after the comparison. The master LLM receives all artifacts from both variants — reviews, syntheses, benchmarks, and model deanonymization mappings — and produces a structured report including:
 

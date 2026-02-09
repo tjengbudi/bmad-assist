@@ -1,0 +1,45 @@
+# A/B Test: QA Pipeline Testing
+#
+# Tests the full QA pipeline (retrospective → plan → execute → remediate)
+# on the markdown-notes-003 fixture.
+#
+# Each story is the LAST story in its epic, pinned to the refactor commit
+# after code_review_synthesis — the project is in "epic complete" state,
+# ready for epic_teardown phases.
+#
+# trace/tea_nfr_assess removed: QA phases don't consume their artifacts
+# and neither has a Phase mapping in WORKFLOW_TO_PHASE (would be skipped).
+
+name: qa-testing-001-remediate
+fixture: markdown-notes-003
+analysis: true    # <-- enables LLM analysis
+stories:
+  # - id: "1.5"   # Last story Epic 1 (Note CRUD)
+  #   ref: 39e9205  # refactor(story-1.5): apply code review changes
+  - id: "2.4"   # Last story Epic 2 (Markdown Features)
+    ref: 2edc36f  # refactor(story-2.4): apply code review changes
+  # - id: "3.5"   # Last story Epic 3 (Organization)
+  #   ref: 13e0ca1  # refactor(story-3.5): apply code review changes
+  # - id: "4.4"   # Last story Epic 4 (Tagging System)
+  #   ref: 0b178c1  # refactor(story-4.4): apply code review changes
+  # - id: "5.4"   # Last story Epic 5 (Search)
+  #   ref: b9473d8  # refactor(story-5.4): apply code review changes
+  # - id: "6.4"   # Last story Epic 6 (Import/Export)
+  #   ref: 260997d  # refactor(story-6.4): apply code review changes
+phases:
+  - retrospective           # Epic retro (generates context for qa_plan_generate)
+  # - qa_plan_generate        # Generate E2E test plan
+  # - qa_plan_execute         # Execute E2E tests
+  - qa_remediate            # Collect issues, auto-fix or escalate
+
+variant_a:
+  label: baseline
+  config: opus-haiku-gemini-glm
+  patch_set: baseline
+  workflow_set: baseline
+variant_b:
+  label: qa-2.0
+  config: opus-haiku-gemini-glm-dv-sec-qa
+  patch_set: baseline
+  workflow_set: baseline
+scorecard: true

@@ -127,6 +127,16 @@ class LoopConfig(BaseModel):
                     "Traceability matrix should be generated before retrospective."
                 )
 
+        # qa_remediate should come after qa_plan_execute in teardown
+        if "qa_remediate" in teardown and "qa_plan_execute" in teardown:
+            rem_idx = teardown.index("qa_remediate")
+            exe_idx = teardown.index("qa_plan_execute")
+            if rem_idx < exe_idx:
+                logger.warning(
+                    "Phase ordering: 'qa_remediate' appears before 'qa_plan_execute'. "
+                    "Remediation should run after test execution."
+                )
+
         # epic_setup phases should be ordered: framework → ci → test_design → automate
         setup_order = ["tea_framework", "tea_ci", "tea_test_design", "tea_automate"]
         for i in range(len(setup_order) - 1):
@@ -186,6 +196,9 @@ TEA_FULL_LOOP_CONFIG: LoopConfig = LoopConfig(
         "trace",  # Requirements traceability matrix
         "tea_nfr_assess",  # NFR assessment (release-level)
         "retrospective",
+        "qa_plan_generate",  # Generate E2E test plan
+        "qa_plan_execute",  # Execute E2E tests
+        "qa_remediate",  # Collect issues, auto-fix or escalate
     ],
 )
 

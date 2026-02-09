@@ -66,6 +66,7 @@ def init_handlers(config: "Config", project_path: Path) -> None:
         DevStoryHandler,
         QaPlanExecuteHandler,
         QaPlanGenerateHandler,
+        QaRemediateHandler,
         RetrospectiveHandler,
         ValidateStoryHandler,
         ValidateStorySynthesisHandler,
@@ -99,6 +100,7 @@ def init_handlers(config: "Config", project_path: Path) -> None:
         Phase.RETROSPECTIVE: RetrospectiveHandler(config, project_path),
         Phase.QA_PLAN_GENERATE: QaPlanGenerateHandler(config, project_path),
         Phase.QA_PLAN_EXECUTE: QaPlanExecuteHandler(config, project_path),
+        Phase.QA_REMEDIATE: QaRemediateHandler(config, project_path),
     }
     _handlers_initialized = True
 

@@ -282,9 +282,48 @@ def _build_prompt(
     return "\n\n".join(parts)
 
 
+def _load_analysis_config(
+    config: ABTestConfig,
+    experiments_dir: Path,
+) -> None:
+    """Load config singleton from experiment template for LLM invocation.
+
+    Uses variant_a's config template to populate the config singleton,
+    matching the same logic as ABTestRunner._build_config_dict().
+
+    Args:
+        config: A/B test configuration (uses variant_a.config).
+        experiments_dir: Path to experiments directory.
+
+    """
+    from bmad_assist.core.config import Config, ProviderConfig
+    from bmad_assist.core.config.loaders import load_config
+    from bmad_assist.experiments.config import ConfigRegistry
+
+    registry = ConfigRegistry(experiments_dir / "configs")
+    template = registry.get(config.variant_a.config)
+
+    if template.raw_config:
+        config_dict = dict(template.raw_config)
+        for key in ("name", "config_name", "description"):
+            config_dict.pop(key, None)
+    elif template.providers is not None:
+        config_dict = Config(
+            providers=ProviderConfig(
+                master=template.providers.master,
+                multi=template.providers.multi,
+            ),
+        ).model_dump()
+    else:
+        config_dict = {}
+
+    load_config(config_dict)
+
+
 def generate_ab_analysis(
     config: ABTestConfig,
     result_dir: Path,
+    experiments_dir: Path | None = None,
 ) -> Path | None:
     """Generate an LLM-powered analysis report for A/B test results.
 
@@ -295,12 +334,20 @@ def generate_ab_analysis(
     Args:
         config: A/B test configuration.
         result_dir: Root result directory containing variant subdirs.
+        experiments_dir: Path to experiments directory. When provided,
+            self-loads the config singleton from the experiment template
+            (needed when called after runner resets singletons or from
+            standalone CLI).
 
     Returns:
         Path to generated analysis.md, or None if generation failed.
 
     """
     logger.info("Generating A/B analysis report via LLM...")
+
+    # Self-load config if experiments_dir provided (standalone or post-reset)
+    if experiments_dir is not None:
+        _load_analysis_config(config, experiments_dir)
 
     # Collect artifacts from both variants
     variant_a_dir = result_dir / "variant-a"
