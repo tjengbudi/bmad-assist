@@ -522,8 +522,10 @@ class TestSynthesisContext:
         assert root is not None
 
         # The escaped sequence should be in the output
-        # ]]> becomes ]]]]><![CDATA[>
-        assert "]]]]><![CDATA[>" in result.context or "data[index]" in result.context
+        # ]]> becomes \n]]]]><![CDATA[\n (with newlines)
+        assert ("\n]]]]><![CDATA[\n" in result.context or
+                "]]]]><![CDATA[>" in result.context or
+                "data[index]" in result.context)
 
 
 class TestSynthesisValidation:
@@ -1587,3 +1589,101 @@ document_output_language: English
         ]
         for section in format_sections:
             assert section in content, f"Missing output format section: {section}"
+
+
+class TestDeepVerifyFindingsInSynthesis:
+    """Tests for Deep Verify findings inclusion in validate_story_synthesis."""
+
+    def test_dv_findings_in_synthesis_context(self, tmp_project: Path) -> None:
+        """DV findings from cache are added to synthesis context as [Deep Verify Findings]."""
+        from bmad_assist.compiler.workflows.validate_story_synthesis import (
+            ValidateStorySynthesisCompiler,
+        )
+        from bmad_assist.deep_verify.core.types import (
+            serialize_validation_result,
+            VerdictDecision,
+        )
+
+        # Use serialized format (as it comes from cache)
+        dv_data = {
+            "verdict": "REJECT",
+            "score": 42.5,
+            "findings": [
+                {
+                    "id": "F1",
+                    "severity": "high",
+                    "title": "Missing error handling",
+                    "description": "Bad code missing error handling",
+                    "method_id": "pattern_match",
+                    "domain": "quality",
+                    "evidence": [
+                        {"quote": "bad code", "line_number": 42, "confidence": 0.9}
+                    ],
+                }
+            ],
+            "domains_detected": [
+                {"domain": "quality", "confidence": 0.9}
+            ],
+            "methods_executed": ["pattern_match"],
+            "duration_ms": 150,
+        }
+
+        # Create test context with DV findings and 2 validations
+        context = create_test_context(
+            tmp_project,
+            epic_num=11,
+            story_num=1,
+            validations=[
+                AnonymizedValidation(
+                    validator_id="Validator A",
+                    content="Sample validation",
+                    original_ref="uuid-1",
+                ),
+                AnonymizedValidation(
+                    validator_id="Validator B",
+                    content="Second validation",
+                    original_ref="uuid-2",
+                ),
+            ],
+        )
+        context.resolved_variables["deep_verify_findings"] = dv_data
+
+        compiler = ValidateStorySynthesisCompiler()
+        result = compiler.compile(context)
+
+        # DV findings should be in context
+        assert "[Deep Verify Findings]" in result.context
+        assert "Deep Verify Analysis Results" in result.context
+        assert "REJECT" in result.context
+        assert "Missing error handling" in result.context
+
+    def test_no_dv_findings_when_not_provided(self, tmp_project: Path) -> None:
+        """When DV findings not provided, [Deep Verify Findings] section not added."""
+        from bmad_assist.compiler.workflows.validate_story_synthesis import (
+            ValidateStorySynthesisCompiler,
+        )
+
+        context = create_test_context(
+            tmp_project,
+            epic_num=11,
+            story_num=1,
+            validations=[
+                AnonymizedValidation(
+                    validator_id="Validator A",
+                    content="Sample validation",
+                    original_ref="uuid-1",
+                ),
+                AnonymizedValidation(
+                    validator_id="Validator B",
+                    content="Second validation",
+                    original_ref="uuid-2",
+                ),
+            ],
+        )
+        # No DV findings in resolved_variables
+
+        compiler = ValidateStorySynthesisCompiler()
+        result = compiler.compile(context)
+
+        # DV findings should NOT be in context
+        assert "[Deep Verify Findings]" not in result.context

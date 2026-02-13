@@ -1420,7 +1420,7 @@ class TestProjectContextResolution:
         assert "project" in error_msg
 
     def test_project_context_none_when_missing(self, tmp_path: Path) -> None:
-        """project_context is 'none' when no file exists."""
+        """project_context has default path when no file exists."""
         # Create empty docs structure
         (tmp_path / "docs").mkdir()
 
@@ -1441,7 +1441,10 @@ class TestProjectContextResolution:
 
         resolved = resolve_variables(context, {})
 
-        assert resolved["project_context"] == "none"
+        # Should return attributed var with default path instead of "none"
+        assert isinstance(resolved["project_context"], dict)
+        assert "_value" in resolved["project_context"]
+        assert "project-context.md" in resolved["project_context"]["_value"]
 
     def test_project_context_symlink_prefers_hyphen(self, tmp_path: Path) -> None:
         """project_context uses project-context.md when underscore is symlink."""

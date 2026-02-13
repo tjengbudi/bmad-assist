@@ -552,10 +552,31 @@ def run(
             _error("--story requires --epic")
             raise typer.Exit(code=EXIT_CONFIG_ERROR)
 
-        # Validate: --phase requires both --epic and --story
-        if phase_override and (not epic or not story):
-            _error("--phase requires both --epic and --story")
+        # Validate --phase
+        if phase_override and not epic:
+            _error("--phase requires --epic")
             raise typer.Exit(code=EXIT_CONFIG_ERROR)
+
+        # For epic-level phases (teardown/setup), --story is optional.
+        # For story-level phases, --story is required.
+        _is_epic_level_phase = False
+        if phase_override:
+            try:
+                _override_phase_check = Phase(phase_override)
+            except ValueError:
+                valid_phases = [p.value for p in Phase]
+                _error(f"Invalid phase '{phase_override}'. Valid values: {', '.join(valid_phases)}")
+                raise typer.Exit(code=EXIT_CONFIG_ERROR) from None
+
+            from bmad_assist.core.config import load_loop_config
+
+            _lc = load_loop_config(project_path)
+            _epic_phases = set(_lc.epic_setup) | set(_lc.epic_teardown)
+            _is_epic_level_phase = phase_override in _epic_phases
+
+            if not _is_epic_level_phase and not story:
+                _error(f"--phase {phase_override} is a story-level phase and requires --story")
+                raise typer.Exit(code=EXIT_CONFIG_ERROR)
 
         # Apply start point override if --epic specified
         if epic:
@@ -574,15 +595,23 @@ def run(
 
         # Apply phase override if --phase specified (overrides status-derived phase)
         if phase_override:
-            try:
-                override_phase = Phase(phase_override)
-            except ValueError:
-                valid_phases = [p.value for p in Phase]
-                _error(f"Invalid phase '{phase_override}'. Valid values: {', '.join(valid_phases)}")
-                raise typer.Exit(code=EXIT_CONFIG_ERROR) from None
+            override_phase = Phase(phase_override)
 
             state_path = get_state_path(loaded_config, project_root=project_path)
             state = load_state(state_path)
+
+            # For epic-level phases without --story, ensure we have a valid story
+            # in state (use last story from the epic)
+            if _is_epic_level_phase and not story and state.current_story is None:
+                # epic is guaranteed non-None (validated above)
+                assert epic is not None
+                resolved_epic = parse_epic_id(epic.strip())
+                epic_story_list = stories_by_epic.get(resolved_epic, [])
+                if epic_story_list:
+                    last_story = epic_story_list[-1]
+                    update_position(state, story=last_story)
+                    logger.debug("Auto-selected last story %s for epic-level phase", last_story)
+
             update_position(state, phase=override_phase)
             save_state(state, state_path)
             console.print(f"[dim]Phase override: starting from {override_phase.value}[/dim]")

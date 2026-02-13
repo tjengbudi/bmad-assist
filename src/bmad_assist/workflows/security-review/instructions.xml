@@ -44,10 +44,15 @@
   </analysis-instructions>
 
   <output-format>
-    <important>
-      You MUST output your findings between these exact markers.
-      The JSON must be valid and parseable.
-    </important>
+    <critical>
+      CRITICAL OUTPUT FORMAT REQUIREMENT:
+      Your entire output MUST be ONLY the JSON between the markers below.
+      Do NOT include any markdown, headers, or explanatory text outside the JSON.
+      Do NOT include "# Security Vulnerability Analysis Report" or similar headers.
+      The very first line of your output should be "&lt;!-- SECURITY_REPORT_START --&gt;"
+      The very last line of your output should be "&lt;!-- SECURITY_REPORT_END --&gt;"
+      Any text outside these markers will cause parsing to FAIL.
+    </critical>
 
     <template>
 <!-- SECURITY_REPORT_START -->
@@ -76,6 +81,7 @@
       - confidence MUST be a float between 0.0 and 1.0
       - id format: SEC-NNN (sequential, starting from SEC-001)
       - The optional "notes" field (string) may be included at the top level alongside "findings"
+      - FAILURE CONDITION: If you include ANY text outside the markers, the security review will be marked as FAILED
     </rules>
   </output-format>
 </instructions>

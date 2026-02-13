@@ -137,6 +137,12 @@ class TimeoutsConfig(BaseModel):
         description="Timeout for qa_remediate phase (None = use default)",
         json_schema_extra={"security": "safe", "ui_widget": "number", "unit": "s"},
     )
+    retries: int | None = Field(
+        default=None,
+        ge=0,
+        description="Retry provider invocation on timeout (None = skip retry, 0 = infinite, N = specific count)",
+        json_schema_extra={"security": "safe", "ui_widget": "number"},
+    )
 
     def get_timeout(self, phase: str) -> int:
         """Get timeout for a specific phase.
@@ -155,6 +161,18 @@ class TimeoutsConfig(BaseModel):
         if phase_timeout is not None:
             return phase_timeout
         return self.default
+
+    def get_retries(self, phase: str) -> int | None:
+        """Get retry count for a specific phase on timeout.
+
+        Args:
+            phase: Phase name (e.g., 'validate_story', 'code_review').
+
+        Returns:
+            retries value (None = skip retry, 0 = infinite, N = specific count).
+
+        """
+        return self.retries
 
 
 class BenchmarkingConfig(BaseModel):
@@ -335,6 +353,13 @@ class QAConfig(BaseModel):
         ge=0.1,
         le=1.0,
         description="If >this fraction is AUTO-FIX, overflow → ESCALATE (0.1-1.0)",
+        json_schema_extra={"security": "safe", "ui_widget": "number"},
+    )
+    remediate_max_issues: int = Field(
+        default=200,
+        ge=10,
+        le=1000,
+        description="Max issues to send to LLM per remediation iteration (10-1000)",
         json_schema_extra={"security": "safe", "ui_widget": "number"},
     )
 

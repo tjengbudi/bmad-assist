@@ -1,0 +1,76 @@
+# Common git intelligence configuration
+# Shared exclude patterns and base commands for all phases
+
+# Default exclusion patterns (glob syntax)
+# Applied to git commands that accept pathspecs
+exclude_patterns:
+  # BMAD output and cache directories
+  - "_bmad-output/**"
+  - ".bmad-assist/**"
+  - ".bmad/**"
+
+  # Test files and fixtures
+  - "**/tests/**"
+  - "**/test_*.py"
+  - "**/tests/*.py"
+  - "**/*_test.go"
+  - "**/*.test.ts"
+  - "**/*.spec.js"
+  - "**/*.spec.ts"
+  - "**/__tests__/**"
+  - "**/fixtures/**"
+  - "**/mocks/**"
+
+  # Configuration files
+  - "**/*.yaml"
+  - "**/*.yml"
+  - "**/*.toml"
+  - "**/*.ini"
+  - "**/*.cfg"
+  - "**/*.conf"
+  - "**/config/**"
+
+  # Lock files and dependencies
+  - "**/package-lock.json"
+  - "**/yarn.lock"
+  - "**/poetry.lock"
+  - "**/Pipfile.lock"
+  - "**/go.sum"
+  - "**/Cargo.lock"
+
+  # Build artifacts and cache
+  - "**/node_modules/**"
+  - "**/__pycache__/**"
+  - "**/.pytest_cache/**"
+  - "**/dist/**"
+  - "**/build/**"
+  - "**/.next/**"
+  - "**/.venv/**"
+  - "**/venv/**"
+  - "**/.env*"
+
+  # IDE files
+  - "**/.vscode/**"
+  - "**/.idea/**"
+  - "**/*.swp"
+  - "**/*.swo"
+  - "**/.DS_Store"
+
+  # Documentation (less relevant for git archaeology)
+  - "**/docs/public/**"
+  - "**/site/**"
+
+# Base git commands (can be overridden/inherited by phase-specific files)
+base_commands:
+  - name: "Recent Project Commits"
+    description: "Recent commits affecting the project"
+    command: "git log --oneline -10"
+
+  - name: "Current Branch"
+    description: "Current git branch and status"
+    command: "git status --short"
+
+  - name: "Uncommitted Changes"
+    description: "Modified files (excluding tests and config)"
+    # Exclusions applied programmatically
+    command: "git diff --stat"

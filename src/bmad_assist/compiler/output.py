@@ -70,6 +70,8 @@ def _wrap_cdata(content: str) -> str:
     Handles the edge case where content contains ']]>' by splitting
     into multiple CDATA sections.
 
+    Adds two newlines after <![CDATA[ and before ]]> for readability.
+
     Args:
         content: Raw content to wrap.
 
@@ -80,11 +82,81 @@ def _wrap_cdata(content: str) -> str:
     if not content:
         return ""
     # Handle ]]> in content by splitting CDATA sections
-    # "foo]]>bar" becomes "<![CDATA[foo]]]]><![CDATA[>bar]]>"
+    # "foo]]>bar" becomes "<![CDATA[\n\nfoo\n\n]]]]><![CDATA[\n\n>\n\n]]>"
     if "]]>" in content:
         parts = content.split("]]>")
-        return "<![CDATA[" + "]]]]><![CDATA[>".join(parts) + "]]>"
-    return f"<![CDATA[{content}]]>"
+        return "<![CDATA[\n\n" + "\n\n]]]]><![CDATA[\n\n".join(parts) + "\n\n]]>"
+    return "<![CDATA[\n\n" + content + "\n\n]]>"
+
+
+def _get_file_label(path_str: str) -> str:
+    """Get human-readable label for a file based on its path pattern.
+
+    Args:
+        path_str: File path (can be absolute, relative, or virtual like "[Validator A]").
+
+    Returns:
+        Uppercase label describing the file type (e.g., "PROJECT CONTEXT", "STORY FILE").
+
+    """
+    path_lower = path_str.lower()
+
+    # Virtual paths (validation outputs, DV findings, etc.)
+    if path_str.startswith("[") and path_str.endswith("]"):
+        if "validator" in path_lower:
+            return "VALIDATION OUTPUT"
+        if "reviewer" in path_lower:
+            return "CODE REVIEW OUTPUT"
+        if "deep verify" in path_lower:
+            return "DEEP VERIFY FINDINGS"
+        if "security" in path_lower:
+            return "SECURITY ANALYSIS"
+        return "VIRTUAL CONTENT"
+
+    # Strategic docs
+    if "project_context" in path_lower or "project-context" in path_lower:
+        return "PROJECT CONTEXT"
+    if path_lower.endswith("prd.md"):
+        return "PRD"
+    if "architecture" in path_lower and path_lower.endswith(".md"):
+        return "ARCHITECTURE"
+    if "ux" in path_lower and path_lower.endswith(".md"):
+        return "UX DESIGN"
+    if "epic" in path_lower and path_lower.endswith(".md"):
+        return "EPIC"
+    if "epics" in path_lower:
+        return "EPIC"
+    if "modules" in path_lower and path_lower.endswith(".md"):
+        return "MODULE DOCUMENTATION"
+
+    # Story files
+    if "sprint-artifacts" in path_lower or "implementation-artifacts" in path_lower:
+        import re
+        if re.search(r"/\d+-\d+-[^/]+\.md$", path_lower):
+            return "STORY FILE"
+        if "sprint-status" in path_lower:
+            return "SPRINT STATUS"
+
+    # Source code
+    if path_str.endswith((".py", ".js", ".ts", ".jsx", ".tsx", ".go", ".rs", ".java", ".cpp", ".c", ".h")):
+        return "SOURCE CODE"
+    if path_str.endswith((".yaml", ".yml", ".toml", ".json", ".xml")):
+        return "CONFIG FILE"
+    if path_str.endswith((".md", ".rst", ".txt")):
+        return "DOCUMENTATION"
+    if path_str.endswith((".css", ".scss", ".sass", ".less")):
+        return "STYLESHEET"
+    if path_str.endswith((".html", ".htm")):
+        return "HTML TEMPLATE"
+    if path_str.endswith(".sql"):
+        return "SQL QUERY"
+
+    # Test files
+    if "test" in path_lower:
+        return "TEST FILE"
+
+    # Default
+    return "FILE"
 
 
 @dataclass(frozen=True)
@@ -253,13 +325,16 @@ def _build_context_section(
     Uses CDATA to preserve < > characters in file contents.
     Each file gets a deterministic short ID (hash of path) for cross-referencing.
 
+    Paths in XML are relative to project_root to reduce noise.
+    Each file gets a label attribute indicating its type.
+
     Args:
         context_files: Dict mapping file paths to content.
-        project_root: Project root (unused, kept for API compatibility).
+        project_root: Project root for generating relative paths.
         links_only: If True, only include file paths without content (debug mode).
 
     Returns:
-        ContextSectionResult with XML string and path-to-ID mapping.
+        ContextSectionResult with XML string and relative path-to-ID mapping.
 
     """
     file_elements: list[str] = []
@@ -281,60 +356,51 @@ def _build_context_section(
                 logger.debug(f"Skipping empty file: {path_str}")
             continue
 
-        # Normalize to absolute path
-        path = Path(path_str)
-        abs_path = _normalize_path(path)
+        # Get label for this file type
+        label = _get_file_label(path_str)
 
-        # Generate deterministic ID
-        file_id = _generate_file_id(abs_path)
-        path_to_id[abs_path] = file_id
+        # For virtual paths (starting with [), use as-is
+        # For real paths, compute relative path from project root
+        if path_str.startswith("["):
+            display_path = path_str
+            # Hash the virtual path for ID
+            file_id = _generate_file_id(path_str)
+        else:
+            path = Path(path_str)
+            try:
+                # Try to make path relative to project root
+                abs_path = path.resolve()
+                display_path = str(abs_path.relative_to(project_root.resolve()))
+            except (ValueError, OSError):
+                # If path is outside project_root, use basename or full path
+                display_path = path.name
+                abs_path = path
+            # Generate deterministic ID from absolute path for uniqueness
+            file_id = _generate_file_id(str(abs_path))
+
+        path_to_id[display_path] = file_id
 
         if links_only:
             # Debug mode: show only path and token estimate from actual file
             try:
-                actual_size = path.stat().st_size
+                actual_size = Path(path_str).stat().st_size
                 token_approx = actual_size // 4  # ~4 chars per token
             except (OSError, FileNotFoundError):
                 # Fallback to content length if file doesn't exist
                 token_approx = len(content) // 4
             file_elements.append(
-                f'<file id="{file_id}" path="{_escape_xml_attr(abs_path)}" '
-                f'token_approx="{token_approx}" />'
+                f'<file id="{file_id}" path="{_escape_xml_attr(display_path)}" '
+                f'label="{_escape_xml_attr(label)}" token_approx="{token_approx}" />'
             )
         else:
             # Normal mode: include full content in CDATA
             file_elements.append(
-                f'<file id="{file_id}" path="{_escape_xml_attr(abs_path)}">'
-                f"{_wrap_cdata(content)}</file>"
+                f'<file id="{file_id}" path="{_escape_xml_attr(display_path)}" '
+                f'label="{_escape_xml_attr(label)}">{_wrap_cdata(content)}</file>'
             )
 
     xml = "<context>\n" + "\n".join(file_elements) + "\n</context>"
     return ContextSectionResult(xml=xml, path_to_id=path_to_id)
-
-
-def _build_file_index_section(path_to_id: dict[str, str]) -> str:
-    """Build the <file-index> section with embedded file references.
-
-    Provides a quick lookup table for LLMs to find embedded files by ID.
-    Placed after <variables> for easy reference when processing variables
-    that point to embedded files.
-
-    Args:
-        path_to_id: Mapping of absolute file paths to their short IDs.
-
-    Returns:
-        XML string for the <file-index> section.
-
-    """
-    if not path_to_id:
-        return "<file-index />"
-
-    entries: list[str] = []
-    # Sort by path for deterministic output
-    for path, file_id in sorted(path_to_id.items()):
-        entries.append(f'<entry id="{file_id}" path="{_escape_xml_attr(path)}" />')
-
-    return "<file-index>\n" + "\n".join(entries) + "\n</file-index>"
 
 
 def _escape_xml_text(value: str) -> str:
@@ -370,14 +436,17 @@ def _is_attributed_var(value: Any) -> bool:
 def _find_file_id_for_value(
     value: str | None,
     path_to_id: dict[str, str],
+    project_root: Path | None = None,
 ) -> str | None:
     """Find file ID if value matches an embedded file path.
 
     Normalizes the value path and checks against the path_to_id mapping.
+    Handles both absolute and relative paths in path_to_id.
 
     Args:
         value: Variable value (possibly a file path).
-        path_to_id: Mapping of absolute file paths to their IDs.
+        path_to_id: Mapping of file paths to their IDs (now relative paths).
+        project_root: Project root for converting absolute to relative paths.
 
     Returns:
         File ID if value matches an embedded file, None otherwise.
@@ -386,19 +455,38 @@ def _find_file_id_for_value(
     if not value or not path_to_id:
         return None
 
-    # Normalize the value as a path for comparison
+    # First try exact match (for virtual paths like [Validator A])
+    if value in path_to_id:
+        return path_to_id[value]
+
+    # Try absolute path normalization
     try:
-        normalized = str(Path(value).resolve()).replace("\\", "/")
-        return path_to_id.get(normalized)
+        abs_path = str(Path(value).resolve()).replace("\\", "/")
+        # Try direct match with absolute path
+        if abs_path in path_to_id:
+            return path_to_id[abs_path]
+
+        # Try converting to relative path if project_root is available
+        if project_root is not None:
+            try:
+                rel_path = str(Path(abs_path).relative_to(project_root.resolve()))
+                if rel_path in path_to_id:
+                    return path_to_id[rel_path]
+            except (ValueError, OSError):
+                # Path is outside project_root, skip
+                pass
     except (OSError, ValueError):
         # Not a valid path
-        return None
+        pass
+
+    return None
 
 
 def _build_attributed_var(
     name: str,
     attrs: dict[str, Any],
     path_to_id: dict[str, str] | None = None,
+    project_root: Path | None = None,
 ) -> str:
     """Build XML element for variable with attributes.
 
@@ -406,6 +494,7 @@ def _build_attributed_var(
         name: Variable name.
         attrs: Dict with attribute keys (prefixed with _).
         path_to_id: Optional mapping of file paths to IDs for cross-referencing.
+        project_root: Project root for converting absolute to relative paths.
 
     Returns:
         XML string for the variable element.
@@ -417,10 +506,23 @@ def _build_attributed_var(
     # Check if value matches an embedded file
     var_value = attrs.get("_value")
     file_id = None
+    display_value = var_value  # Default: show original value
+
     if path_to_id and var_value is not None:
-        file_id = _find_file_id_for_value(str(var_value), path_to_id)
+        file_id = _find_file_id_for_value(str(var_value), path_to_id, project_root)
         if file_id:
             attr_parts.append(f'file_id="{file_id}"')
+            # When embedded, show "embedded in prompt, file id: {id}" as value
+            display_value = f"embedded in prompt, file id: {file_id}"
+        elif project_root is not None:
+            # For non-embedded files, convert to relative path from project root
+            try:
+                abs_path = Path(str(var_value)).resolve()
+                rel_path = str(abs_path.relative_to(project_root.resolve()))
+                display_value = rel_path
+            except (ValueError, OSError):
+                # Keep original value if path is outside project_root
+                display_value = str(var_value)
 
     # Add description if present
     if "_description" in attrs:
@@ -444,7 +546,7 @@ def _build_attributed_var(
 
     # Check if has value
     if "_value" in attrs and attrs["_value"] is not None:
-        value = _escape_xml_text(str(attrs["_value"]))
+        value = _escape_xml_text(str(display_value))
         return f"<var {attr_str}>{value}</var>"
     else:
         # Self-closing tag - no value
@@ -469,6 +571,7 @@ def _is_garbage_variable(name: str) -> bool:
 def _build_variables_section(
     variables: dict[str, Any],
     path_to_id: dict[str, str] | None = None,
+    project_root: Path | None = None,
 ) -> str:
     """Build the <variables> section with sorted variables.
 
@@ -484,6 +587,7 @@ def _build_variables_section(
     Args:
         variables: Dict of variable names to values.
         path_to_id: Optional mapping of file paths to IDs for cross-referencing.
+        project_root: Project root for converting absolute to relative paths.
 
     Returns:
         XML string for the <variables> section.
@@ -504,19 +608,37 @@ def _build_variables_section(
 
         if _is_attributed_var(value):
             # Variable with attributes
-            var_elements.append(_build_attributed_var(name, value, path_to_id))
+            var_elements.append(_build_attributed_var(name, value, path_to_id, project_root))
         else:
             # Simple variable - check if it matches a file path
             serialized = _serialize_value(value)
             file_id = None
-            if path_to_id and isinstance(value, str):
-                file_id = _find_file_id_for_value(value, path_to_id)
+            display_value = serialized  # Default: show original value
 
-            if file_id:
-                var_elements.append(
-                    f'<var name="{_escape_xml_attr(name)}" file_id="{file_id}">'
-                    f"{_escape_xml_text(serialized)}</var>"
-                )
+            if path_to_id and isinstance(value, str):
+                file_id = _find_file_id_for_value(value, path_to_id, project_root)
+                if file_id:
+                    # When embedded, show "embedded in prompt, file id: {id}" as value
+                    display_value = f"embedded in prompt, file id: {file_id}"
+                    var_elements.append(
+                        f'<var name="{_escape_xml_attr(name)}" file_id="{file_id}">'
+                        f"{_escape_xml_text(display_value)}</var>"
+                    )
+                elif project_root is not None:
+                    # For non-embedded files, try to show relative path
+                    try:
+                        abs_path = Path(value).resolve()
+                        rel_path = str(abs_path.relative_to(project_root.resolve()))
+                        display_value = rel_path
+                    except (ValueError, OSError):
+                        display_value = serialized
+                    var_elements.append(
+                        f'<var name="{_escape_xml_attr(name)}">{_escape_xml_text(display_value)}</var>'
+                    )
+                else:
+                    var_elements.append(
+                        f'<var name="{_escape_xml_attr(name)}">{_escape_xml_text(serialized)}</var>'
+                    )
             else:
                 var_elements.append(
                     f'<var name="{_escape_xml_attr(name)}">{_escape_xml_text(serialized)}</var>'
@@ -538,20 +660,19 @@ def generate_output(
     1. <mission> - task description (least context-dependent)
     2. <context> - project files with IDs (background -> specific)
     3. <variables> - resolved variable values (with file_id when matching embedded file)
-    4. <file-index> - lookup table for embedded files
-    5. <instructions> - filtered execution steps (embedded as raw XML)
-    6. <output-template> - expected output template (most relevant for generation)
+    4. <instructions> - filtered execution steps (embedded as raw XML)
+    5. <output-template> - expected output template (most relevant for generation)
 
     IMPORTANT: This function builds XML manually to avoid ElementTree's automatic
     escaping of < > characters. Instructions contain XML tags that must be
     preserved literally.
 
-    File paths in <context> are absolute (not relative) to match variable values
-    and prevent LLM confusion about file locations.
+    File paths in <context> are relative to project_root to reduce noise.
+    Each file has a label attribute indicating its type (e.g., "PROJECT CONTEXT", "STORY FILE").
 
     Args:
         compiled: CompiledWorkflow data to transform.
-        project_root: Project root (kept for API compatibility, not used for paths).
+        project_root: Project root for generating relative paths.
             Defaults to current working directory if not provided.
         context_files: Optional dict mapping file paths to content.
             If provided, overrides compiled.context for file ordering.
@@ -589,12 +710,9 @@ def generate_output(
         parts.append(f"<context>{_wrap_cdata(compiled.context)}</context>")
 
     # 3. Variables section (sorted alphabetically, with file_id cross-references)
-    parts.append(_build_variables_section(compiled.variables, path_to_id))
+    parts.append(_build_variables_section(compiled.variables, path_to_id, project_root))
 
-    # 4. File index section (lookup table for embedded files)
-    parts.append(_build_file_index_section(path_to_id))
-
-    # 5. Instructions section
+    # 4. Instructions section
     # For XML instructions, embed raw (they're already valid XML from filter_instructions())
     # For markdown instructions, wrap in CDATA to prevent parsing issues
     if compiled.instructions:

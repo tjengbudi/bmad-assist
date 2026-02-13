@@ -39,6 +39,7 @@ from claude_agent_sdk import (
     CLINotFoundError,
     ProcessError,
     TextBlock,
+    ToolUseBlock,
     query,
 )
 
@@ -49,7 +50,12 @@ from bmad_assist.core.exceptions import (
 from bmad_assist.providers.base import (
     BaseProvider,
     ProviderResult,
+    extract_tool_details,
+    format_tag,
+    is_full_stream,
+    should_print_progress,
     validate_settings_file,
+    write_progress,
 )
 
 logger = logging.getLogger(__name__)
@@ -197,6 +203,7 @@ class ClaudeSDKProvider(BaseProvider):
         settings: Path | None,
         cwd: Path | None,
         allowed_tools: list[str] | None = None,
+        color_index: int | None = None,
     ) -> str:
         """Execute SDK query asynchronously.
 
@@ -212,6 +219,7 @@ class ClaudeSDKProvider(BaseProvider):
             cwd: Working directory for the CLI process.
             allowed_tools: Optional list of tools to allow. If provided, uses
                 the SDK's 'tools' parameter to restrict available tools.
+            color_index: Color index for progress output.
 
         Returns:
             Response text extracted from AssistantMessage TextBlocks.
@@ -240,6 +248,9 @@ class ClaudeSDKProvider(BaseProvider):
             # IMPORTANT: empty list [] means "no tools", None means "all tools"
             # Use explicit check for None to distinguish [] from None
             tools=allowed_tools if allowed_tools is not None else None,
+            # Increase buffer size for long-running conversations (default 1MB)
+            # Dev story workflows can generate extensive conversation history
+            max_buffer_size=10 * 1024 * 1024,  # 10MB buffer for conversation history
         )
 
         response_parts: list[str] = []
@@ -248,11 +259,40 @@ class ClaudeSDKProvider(BaseProvider):
             # Use streaming input to avoid E2BIG with large prompts
             prompt_iter = self._prompt_stream(prompt)
             async for message in query(prompt=prompt_iter, options=options):
-                # Extract text content from AssistantMessage only
+                # Extract content from AssistantMessage only
                 if isinstance(message, AssistantMessage):
                     for block in message.content:
                         if isinstance(block, TextBlock):
-                            response_parts.append(block.text)
+                            text = block.text
+                            response_parts.append(text)
+                            # Show progress for assistant messages
+                            if should_print_progress():
+                                tag = format_tag("ASSISTANT", color_index)
+                                if is_full_stream():
+                                    write_progress(f"{tag} {text}")
+                                else:
+                                    preview = text[:100].replace("\n", " ")
+                                    if len(text) > 100:
+                                        preview += "..."
+                                    write_progress(f"{tag} {preview}")
+                        elif isinstance(block, ToolUseBlock):
+                            # Log tool use
+                            tool_name = block.name
+                            tool_input = block.input
+                            if should_print_progress():
+                                tag = format_tag(f"TOOL {tool_name}", color_index)
+                                if is_full_stream():
+                                    import json as _json
+
+                                    write_progress(
+                                        f"{tag} {_json.dumps(tool_input, indent=2)}"
+                                    )
+                                else:
+                                    details = extract_tool_details(tool_name, tool_input, cwd)
+                                    if details:
+                                        write_progress(f"{tag} {details}")
+                                    else:
+                                        write_progress(f"{tag}")
                 # ResultMessage is metadata only (cost/usage) - skip
                 # Other message types (SystemMessage, UserMessage) - skip
 
@@ -275,6 +315,7 @@ class ClaudeSDKProvider(BaseProvider):
         allowed_tools: list[str] | None,
         cancel_token: threading.Event,
         timeout: int,
+        color_index: int | None = None,
     ) -> str:
         """Execute SDK query with cancel_token support.
 
@@ -290,6 +331,7 @@ class ClaudeSDKProvider(BaseProvider):
             allowed_tools: Optional list of allowed tools.
             cancel_token: Threading event checked for cancellation.
             timeout: Timeout in seconds.
+            color_index: Color index for progress output.
 
         Returns:
             Response text from SDK.
@@ -302,7 +344,7 @@ class ClaudeSDKProvider(BaseProvider):
 
         """
         sdk_task = asyncio.create_task(
-            self._invoke_async(prompt, model, settings, cwd, allowed_tools)
+            self._invoke_async(prompt, model, settings, cwd, allowed_tools, color_index)
         )
 
         async def _wait_for_cancel() -> None:
@@ -459,14 +501,14 @@ class ClaudeSDKProvider(BaseProvider):
                 response_text = run_async_in_thread(
                     self._invoke_with_cancel(
                         prompt, effective_model, validated_settings, cwd,
-                        allowed_tools, cancel_token, effective_timeout,
+                        allowed_tools, cancel_token, effective_timeout, color_index,
                     )
                 )
             else:
                 response_text = run_async_in_thread(
                     asyncio.wait_for(
                         self._invoke_async(
-                            prompt, effective_model, validated_settings, cwd, allowed_tools
+                            prompt, effective_model, validated_settings, cwd, allowed_tools, color_index
                         ),
                         timeout=effective_timeout,
                     )

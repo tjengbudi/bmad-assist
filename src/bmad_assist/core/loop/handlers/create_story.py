@@ -23,6 +23,12 @@ logger = logging.getLogger(__name__)
 
 MAX_RETRIES = 3
 MIN_STORY_CONTENT_LENGTH = 400
+REQUIRED_SECTION_PATTERNS = (
+    re.compile(r"^#{2,}\s+Story\b", re.MULTILINE | re.IGNORECASE),
+    re.compile(r"^#{2,}\s+Acceptance\s+Criteria\b", re.MULTILINE | re.IGNORECASE),
+    re.compile(r"^#{2,}\s+Tasks?\b", re.MULTILINE | re.IGNORECASE),
+)
+# Keep for backward compat (exported in tests)
 REQUIRED_SECTIONS = ("## Story", "## Acceptance Criteria", "## Tasks")
 
 _STORY_HEADER_PATTERN = re.compile(r"^# Story\s+[\w.-]+\s*:\s*(.+)$", re.MULTILINE)
@@ -130,7 +136,7 @@ def _validate_story_content(content: str) -> bool:
     if len(content) < MIN_STORY_CONTENT_LENGTH:
         return False
 
-    return all(section in content for section in REQUIRED_SECTIONS)
+    return all(pat.search(content) for pat in REQUIRED_SECTION_PATTERNS)
 
 
 def _write_rescued_story(state: State, content: str, title: str | None) -> Path:

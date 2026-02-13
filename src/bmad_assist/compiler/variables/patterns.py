@@ -18,6 +18,9 @@ from bmad_assist.compiler.variables.project_context import _estimate_tokens
 
 logger = logging.getLogger(__name__)
 
+# Fallback locations for strategic docs when not found in planning_artifacts
+FALLBACK_DOC_LOCATIONS = ["docs", "docs/modules"]
+
 __all__ = [
     "_resolve_input_file_patterns",
     "_find_sharded_index",
@@ -94,30 +97,33 @@ def _resolve_input_file_patterns(
 
         # Fall back to whole file
         if not file_path and whole_pattern:
-            whole_file = _find_whole_file(whole_pattern)
+            whole_file = _find_whole_file(whole_pattern, context.project_root)
             if whole_file:
                 file_path = str(whole_file)
                 logger.debug("Found whole artifact for '%s': %s", pattern_name, file_path)
 
+        # Always set _value - if file not found, use pattern as fallback path
+        if not file_path:
+            # Use pattern as fallback (shows where file would be)
+            fallback = whole_pattern if whole_pattern else sharded_pattern
+            file_path = fallback if fallback else f"{pattern_name} (not found)"
+            logger.debug("No file found for '%s', using pattern as path: %s", pattern_name, file_path)
+
         # Create variable with attributes
-        if file_path:
-            var_attrs: dict[str, Any] = {
-                "_value": file_path,
-                "_description": description,
-                "_load_strategy": load_strategy,
-            }
-            if is_sharded:
-                var_attrs["_sharded"] = "true"
-            # Add token estimate for LLM context awareness
+        var_attrs: dict[str, Any] = {
+            "_value": file_path,
+            "_description": description,
+            "_load_strategy": load_strategy,
+        }
+        if is_sharded:
+            var_attrs["_sharded"] = "true"
+        # Add token estimate for LLM context awareness (only if file exists)
+        try:
             token_estimate = _estimate_tokens(Path(file_path))
             if token_estimate is not None:
                 var_attrs["_token_approx"] = str(token_estimate)
-        else:
-            # File not found - only description, no value
-            var_attrs = {
-                "_description": description,
-            }
-            logger.debug("No file found for '%s', keeping only description", pattern_name)
+        except (OSError, FileNotFoundError):
+            pass  # File doesn't exist, skip token estimate
 
         # Replace existing variable (even if it was set earlier)
         resolved[var_name] = var_attrs
@@ -198,17 +204,40 @@ def _find_epic_file_in_sharded_dir(sharded_pattern: str, epic_num: Any) -> Path 
     return None
 
 
-def _find_whole_file(whole_pattern: str) -> Path | None:
+def _find_whole_file(whole_pattern: str, project_root: Path | None = None) -> Path | None:
     """Find a single whole file matching the pattern.
 
     Args:
         whole_pattern: Glob pattern for whole file (e.g., 'docs/*architecture*.md')
+        project_root: Optional project root for fallback search in docs/
 
     Returns:
         Path to the file if found (closest to root), None otherwise.
 
     """
     matches = glob_module.glob(whole_pattern, recursive=True)
+
+    if not matches and project_root is not None:
+        # Fallback: try to find file by name in docs/ directories
+        # Extract filename pattern from whole_pattern
+        # e.g., "*prd*.md" -> "prd", "*ux*.md" -> "ux"
+        # Try to extract the base name from pattern
+        base_name = None
+        if "prd" in whole_pattern.lower():
+            base_name = "prd.md"
+        elif "architecture" in whole_pattern.lower():
+            base_name = "architecture.md"
+        elif "ux" in whole_pattern.lower():
+            base_name = "ux-design.md"  # Common UX filename
+        elif "epic" in whole_pattern.lower():
+            base_name = None  # Don't fallback for epics (story-specific)
+
+        if base_name:
+            for fallback_dir in FALLBACK_DOC_LOCATIONS:
+                fallback_path = project_root / fallback_dir / base_name
+                if fallback_path.exists():
+                    logger.debug("Found file in fallback location: %s", fallback_path)
+                    return fallback_path
 
     if not matches:
         return None

@@ -1,0 +1,29 @@
+<tech-stack-detection>
+  <instructions>
+    Analyze the project documentation below and identify ALL tech stacks used.
+
+    Return ONLY a comma-separated list of stack identifiers from this exact set:
+      python, javascript, go, java, rust, ruby, csharp, cpp, swift
+
+    Rules:
+    - TypeScript, React, Vue, Svelte, Next.js, Node.js → "javascript"
+    - Django, Flask, FastAPI, Celery → "python"
+    - Gin, Echo, Fiber → "go"
+    - Spring Boot, Kotlin → "java"
+    - .NET, ASP.NET → "csharp"
+    - Include ALL stacks mentioned, even secondary ones (e.g. SQL scripts, migration tools)
+    - If the project uses a database via an ORM, do NOT add a separate stack for SQL
+    - If unsure about a technology, omit it
+    - Do NOT include frameworks as separate stacks — map them to their language
+    - Do NOT add any explanation, markdown, or extra text
+
+    Example outputs:
+      python, javascript
+      go
+      javascript, python, java
+  </instructions>
+
+  <project-documentation>
+{project_docs}
+  </project-documentation>
+</tech-stack-detection>

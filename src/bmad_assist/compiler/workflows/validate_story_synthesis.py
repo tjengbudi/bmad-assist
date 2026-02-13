@@ -328,11 +328,16 @@ class ValidateStorySynthesisCompiler:
             logger.debug("Added validation to synthesis context: %s", validation_path)
 
         # 5. Deep Verify findings (if available) - high priority technical validation
-        dv_findings = context.resolved_variables.get("deep_verify_findings")
+        # Look in resolved dict (passed from compile()) where DV findings are preserved
+        dv_findings = resolved.get("deep_verify_findings")
+        logger.debug("DV findings check: dv_findings=%s, type=%s", dv_findings is not None, type(dv_findings).__name__ if dv_findings else None)
         if dv_findings:
             dv_content = format_dv_findings_for_prompt(dv_findings)
             files["[Deep Verify Findings]"] = dv_content
-            logger.debug("Added Deep Verify findings to synthesis context")
+            logger.info("Added Deep Verify findings to synthesis context: verdict=%s, findings=%d",
+                        dv_findings.get("verdict", "?"), len(dv_findings.get("findings", [])))
+        else:
+            logger.debug("No Deep Verify findings in resolved_variables for synthesis")
 
         # Count files for logging (excluding virtual paths starting with [)
         file_count = len([k for k in files if not k.startswith("[")])
@@ -441,13 +446,15 @@ Output format:
             # Step 2: Validate inputs early
             self.validate_context(context)
 
-            # Step 3: Extract invocation params
+            # Step 3: Extract invocation params and preserve handler-provided variables
+            # (resolve_variables will replace context.resolved_variables, so save these now)
             epic_num = context.resolved_variables.get("epic_num")
             story_num = context.resolved_variables.get("story_num")
             session_id = context.resolved_variables.get("session_id")
             validations: list[AnonymizedValidation] = context.resolved_variables.get(
                 "anonymized_validations", []
             )
+            dv_findings = context.resolved_variables.get("deep_verify_findings")
 
             # Step 3b: Resolve ALL workflow variables (communication_language, etc.)
             invocation_params = {
@@ -476,6 +483,10 @@ Output format:
                 }
             )
 
+            # Add handler-provided variables (not computed by resolve_variables)
+            if dv_findings:
+                resolved["deep_verify_findings"] = dv_findings
+
             if logger.isEnabledFor(logging.DEBUG):
                 logger.debug("Resolved %d variables", len(resolved))
 
@@ -497,6 +508,12 @@ Output format:
 
             # Step 7b: Filter garbage variables
             filtered_vars = filter_garbage_variables(resolved)
+
+            # Remove variables that are already embedded as context files
+            # to avoid duplication (e.g., deep_verify_findings is embedded as [Deep Verify Findings])
+            if dv_findings and "deep_verify_findings" in filtered_vars:
+                del filtered_vars["deep_verify_findings"]
+                logger.debug("Removed deep_verify_findings from variables (already embedded as file)")
 
             # Step 8: Generate XML output
             compiled = CompiledWorkflow(

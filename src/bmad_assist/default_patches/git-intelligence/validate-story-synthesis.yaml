@@ -1,0 +1,15 @@
+# Git intelligence for validate-story-synthesis workflow
+# Focus: Story file history and validation context
+
+extends: common.yaml
+
+phase_commands:
+  - name: "Story File History"
+    description: "Recent commits to the story file being validated"
+    command: "git log --oneline -5 -- '{{story_file}}'"
+
+  - name: "Current Branch Status"
+    description: "Current git branch and status"
+    command: "git status --short"
+
+  # Minimal git context for synthesis - validators already have project context

@@ -114,12 +114,14 @@ class GitCommand(BaseModel):
 
     Attributes:
         name: Identifier for this command (e.g., "recent_commits").
+        description: Human-readable description of what this command shows.
         command: Git command to execute (e.g., "git log --oneline -5").
             Supports {{variable}} placeholders from resolved_variables.
 
     """
 
     name: str
+    description: str | None = None
     command: str
 
     @field_validator("name")
@@ -171,6 +173,10 @@ class GitIntelligence(BaseModel):
 
     Attributes:
         enabled: Whether git intelligence is enabled (default True).
+        inherit_from: Optional name of git-intelligence config to inherit from
+            (e.g., "dev-story", "code-review"). Loads from git-intelligence/{name}.yaml.
+        exclude_patterns: Glob patterns to exclude from git commands programmatically.
+            These are applied in addition to any exclusions in the git command itself.
         commands: List of git commands to run.
         embed_marker: XML tag name for embedding results (default "git-intelligence").
         no_git_message: Message to embed when git is not initialized.
@@ -178,6 +184,8 @@ class GitIntelligence(BaseModel):
     """
 
     enabled: bool = True
+    inherit_from: str | None = None
+    exclude_patterns: list[str] = []
     commands: list[GitCommand] = []
     embed_marker: str = "git-intelligence"
     no_git_message: str = (

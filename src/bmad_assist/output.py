@@ -70,6 +70,8 @@ def _wrap_cdata(content: str) -> str:
     Handles the edge case where content contains ']]>' by splitting
     into multiple CDATA sections.
 
+    Adds two newlines after <![CDATA[ and before ]]> for readability.
+
     Args:
         content: Raw content to wrap.
 
@@ -80,11 +82,11 @@ def _wrap_cdata(content: str) -> str:
     if not content:
         return ""
     # Handle ]]> in content by splitting CDATA sections
-    # "foo]]>bar" becomes "<![CDATA[foo]]]]><![CDATA[>bar]]>"
+    # "foo]]>bar" becomes "<![CDATA[\n\nfoo\n\n]]]]><![CDATA[\n\n>\n\n]]>"
     if "]]>" in content:
         parts = content.split("]]>")
-        return "<![CDATA[" + "]]]]><![CDATA[>".join(parts) + "]]>"
-    return f"<![CDATA[{content}]]>"
+        return "<![CDATA[\n\n" + "\n\n]]]]><![CDATA[\n\n".join(parts) + "\n\n]]>"
+    return "<![CDATA[\n\n" + content + "\n\n]]>"
 
 
 @dataclass(frozen=True)
@@ -310,31 +312,6 @@ def _build_context_section(
 
     xml = "<context>\n" + "\n".join(file_elements) + "\n</context>"
     return ContextSectionResult(xml=xml, path_to_id=path_to_id)
-
-
-def _build_file_index_section(path_to_id: dict[str, str]) -> str:
-    """Build the <file-index> section with embedded file references.
-
-    Provides a quick lookup table for LLMs to find embedded files by ID.
-    Placed after <variables> for easy reference when processing variables
-    that point to embedded files.
-
-    Args:
-        path_to_id: Mapping of absolute file paths to their short IDs.
-
-    Returns:
-        XML string for the <file-index> section.
-
-    """
-    if not path_to_id:
-        return "<file-index />"
-
-    entries: list[str] = []
-    # Sort by path for deterministic output
-    for path, file_id in sorted(path_to_id.items()):
-        entries.append(f'<entry id="{file_id}" path="{_escape_xml_attr(path)}" />')
-
-    return "<file-index>\n" + "\n".join(entries) + "\n</file-index>"
 
 
 def _escape_xml_text(value: str) -> str:
@@ -591,10 +568,7 @@ def generate_output(
     # 3. Variables section (sorted alphabetically, with file_id cross-references)
     parts.append(_build_variables_section(compiled.variables, path_to_id))
 
-    # 4. File index section (lookup table for embedded files)
-    parts.append(_build_file_index_section(path_to_id))
-
-    # 5. Instructions section
+    # 4. Instructions section
     # For XML instructions, embed raw (they're already valid XML from filter_instructions())
     # For markdown instructions, wrap in CDATA to prevent parsing issues
     if compiled.instructions:

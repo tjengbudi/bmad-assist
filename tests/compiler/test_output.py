@@ -55,15 +55,14 @@ class TestXMLStructure:
         root = ET.fromstring(result.xml)
         assert root.tag == "compiled-workflow"
 
-        # Verify section order (6 sections with file-index)
+        # Verify section order (5 sections without file-index)
         children = list(root)
-        assert len(children) == 6
+        assert len(children) == 5
         assert children[0].tag == "mission"
         assert children[1].tag == "context"
         assert children[2].tag == "variables"
-        assert children[3].tag == "file-index"
-        assert children[4].tag == "instructions"
-        assert children[5].tag == "output-template"
+        assert children[3].tag == "instructions"
+        assert children[4].tag == "output-template"
 
     def test_root_element_is_compiled_workflow(self) -> None:
         """Root element is <compiled-workflow>."""
@@ -172,10 +171,12 @@ class TestContextSectionOrdering:
         context_el = root.find("context")
         file_el = context_el.find("file")
 
-        # Path is now absolute (for matching with variable values)
+        # Path is now relative to project_root (reduces noise)
         path = file_el.get("path")
-        assert path.startswith("/") or path[1] == ":"  # Unix or Windows
-        assert "docs/file.md" in path
+        assert path == "docs/file.md"
+        # Check that label attribute is present
+        label = file_el.get("label")
+        assert label in ("DOCUMENTATION", "FILE")
 
     def test_empty_content_files_skipped(self) -> None:
         """Files with empty content are not included."""
@@ -201,7 +202,7 @@ class TestContextSectionOrdering:
         assert "docs/file2.md" not in paths
 
     def test_file_wrapped_in_file_element(self, tmp_path: Path) -> None:
-        """Each file is wrapped in <file id='...' path='...'> element."""
+        """Each file is wrapped in <file id='...' path='...' label='...'> element."""
         test_file = tmp_path / "docs" / "test.md"
         test_file.parent.mkdir(parents=True)
         test_file.write_text("test content")
@@ -221,13 +222,15 @@ class TestContextSectionOrdering:
         file_el = context_el.find("file")
 
         assert file_el is not None
-        # Path is now absolute
-        assert str(tmp_path) in file_el.get("path")
-        assert "docs/test.md" in file_el.get("path")
+        # Path is now relative to project_root
+        assert file_el.get("path") == "docs/test.md"
+        # Label attribute is present
+        assert file_el.get("label") in ("DOCUMENTATION", "FILE")
         # File has deterministic ID
         assert file_el.get("id") is not None
         assert len(file_el.get("id")) == 8
-        assert file_el.text == "test content"
+        # Content is wrapped in CDATA with two newlines
+        assert file_el.text == "\n\ntest content\n\n"
 
 
 class TestVariablesSection:
@@ -700,7 +703,8 @@ class TestEdgeCasesExtended:
 
         root = ET.fromstring(result.xml)
         context_el = root.find("context")
-        assert context_el.text == "Raw context content"
+        # Context is wrapped in CDATA with two newlines
+        assert context_el.text == "\n\nRaw context content\n\n"
 
     def test_datetime_raises_compiler_error(self) -> None:
         """datetime objects raise CompilerError."""
@@ -888,25 +892,6 @@ class TestFileIdCrossReferencing:
 
         assert file_el.get("id") is not None
         assert len(file_el.get("id")) == 8
-
-    def test_file_index_section_present(self, tmp_path: Path) -> None:
-        """file-index section contains entries for all embedded files."""
-        test_file = tmp_path / "docs" / "file.md"
-        test_file.parent.mkdir(parents=True)
-        test_file.write_text("content")
-
-        context_files = {str(test_file): "content"}
-        compiled = create_test_compiled_workflow()
-        result = generate_output(compiled, project_root=tmp_path, context_files=context_files)
-
-        root = ET.fromstring(result.xml)
-        file_index = root.find("file-index")
-
-        assert file_index is not None
-        entries = list(file_index)
-        assert len(entries) == 1
-        assert entries[0].get("id") is not None
-        assert "file.md" in entries[0].get("path")
 
     def test_variable_gets_file_id_when_matching_embedded_file(self, tmp_path: Path) -> None:
         """Variable pointing to embedded file gets file_id and EMBEDDED strategy."""

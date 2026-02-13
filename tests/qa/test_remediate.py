@@ -5,15 +5,15 @@ from __future__ import annotations
 import time
 from pathlib import Path
 
-import pytest
 import yaml
 
 from bmad_assist.qa.remediate import (
+    REMEDIATE_ESCALATIONS_END,
+    REMEDIATE_ESCALATIONS_START,
     CollectionResult,
     EpicIssue,
     EscalationItem,
-    REMEDIATE_ESCALATIONS_END,
-    REMEDIATE_ESCALATIONS_START,
+    _apply_issue_limit,
     collect_epic_issues,
     compare_failure_sets,
     extract_escalations,
@@ -21,7 +21,6 @@ from bmad_assist.qa.remediate import (
     save_escalation_report,
     save_remediation_report,
 )
-
 
 # ---------------------------------------------------------------------------
 # Data types
@@ -78,7 +77,7 @@ class TestCollectEpicIssues:
     def test_no_sources_returns_empty(self, tmp_path: Path) -> None:
         result = collect_epic_issues(epic_id=99, project_path=tmp_path)
         assert result.issues == []
-        assert result.sources_checked == 6
+        assert result.sources_checked == 8
         assert result.sources_found == 0
 
     def test_qa_results_source(self, tmp_path: Path) -> None:
@@ -216,7 +215,7 @@ class TestCollectEpicIssues:
 
         result = collect_epic_issues(epic_id=1, project_path=tmp_path)
         # Should not raise — warnings capture the error
-        assert result.sources_checked == 6
+        assert result.sources_checked == 8
         assert len(result.warnings) > 0  # Warning was actually recorded
 
 
@@ -407,3 +406,78 @@ class TestCompareFailureSets:
         assert fixed == pre
         assert new == set()
         assert remaining == set()
+
+
+# ---------------------------------------------------------------------------
+# Issue limit enforcement (AC for preventing overflow crashes)
+# ---------------------------------------------------------------------------
+
+
+class TestIssueLimit:
+    """Tests for AC: Issue limit enforcement before LLM invocation."""
+
+    def test_no_truncation_under_limit(self) -> None:
+        """Issues under max_issues pass through unchanged."""
+        issues = [
+            EpicIssue(source="dv", severity="medium", description=f"issue {i}")
+            for i in range(50)
+        ]
+        limited = _apply_issue_limit(issues, max_issues=200)
+        assert len(limited) == 50
+        # Original order preserved when no truncation
+        assert limited == issues
+
+    def test_truncation_at_limit(self) -> None:
+        """Issues over max_issues are truncated, preserving high severity."""
+        issues = (
+            [EpicIssue(source="dv", severity="high", description=f"high {i}") for i in range(150)]
+            + [EpicIssue(source="dv", severity="medium", description=f"med {i}") for i in range(150)]
+        )
+        limited = _apply_issue_limit(issues, max_issues=200)
+        assert len(limited) == 200
+        # All high-severity issues should be preserved
+        high_count = sum(1 for i in limited if i.severity == "high")
+        assert high_count == 150
+        # Remaining 50 should be medium severity
+        med_count = sum(1 for i in limited if i.severity == "medium")
+        assert med_count == 50
+
+    def test_severity_preserved(self) -> None:
+        """High/medium/low mix → high priority kept."""
+        issues = (
+            [EpicIssue(source="dv", severity="low", description=f"low {i}") for i in range(100)]
+            + [EpicIssue(source="dv", severity="high", description=f"high {i}") for i in range(100)]
+            + [EpicIssue(source="dv", severity="medium", description=f"med {i}") for i in range(100)]
+        )
+        limited = _apply_issue_limit(issues, max_issues=150)
+        assert len(limited) == 150
+        # All 100 high should be there
+        high_count = sum(1 for i in limited if i.severity == "high")
+        assert high_count == 100
+        # Remaining 50 should be medium (not low)
+        med_count = sum(1 for i in limited if i.severity == "medium")
+        assert med_count == 50
+        low_count = sum(1 for i in limited if i.severity == "low")
+        assert low_count == 0
+
+    def test_exact_limit(self) -> None:
+        """Exactly max_issues returns same list."""
+        issues = [EpicIssue(source="dv", severity="high", description=f"issue {i}") for i in range(200)]
+        limited = _apply_issue_limit(issues, max_issues=200)
+        assert len(limited) == 200
+
+    def test_empty_list(self) -> None:
+        """Empty issues list returns empty."""
+        limited = _apply_issue_limit([], max_issues=200)
+        assert len(limited) == 0
+
+    def test_unknown_severity_treated_as_low(self) -> None:
+        """Unknown severity values sorted last (after low)."""
+        issues = (
+            [EpicIssue(source="dv", severity="unknown", description=f"unk {i}") for i in range(100)]
+            + [EpicIssue(source="dv", severity="high", description=f"high {i}") for i in range(100)]
+        )
+        limited = _apply_issue_limit(issues, max_issues=100)
+        # All high severity should be preserved, unknown dropped
+        assert all(i.severity == "high" for i in limited)
+        assert len(limited) == 100

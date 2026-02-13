@@ -116,6 +116,12 @@ class DeepVerifyContextConfig(BaseModel):
         le=524288,  # 512KB max allowed
         description="Max combined size of context documents in bytes (default 50KB, max 512KB)",
     )
+    file_context_budget: int = Field(
+        default=4000,
+        ge=2000,
+        le=20000,
+        description="Max characters per file for intelligent context extraction (default 4000, min 2000)",
+    )
 
 
 class ResourceLimitConfig(BaseModel):
@@ -217,6 +223,13 @@ class LLMConfig(BaseModel):
     log_all_calls: bool = Field(
         default=True,
         description="Log all LLM calls with timing and token usage",
+    )
+    method_stagger_seconds: float = Field(
+        default=0.5,
+        ge=0.0,
+        le=30.0,
+        description="Delay between spawning consecutive verification methods (seconds). "
+        "Applied with ±20% jitter to avoid thundering herd.",
     )
     default_timeout_seconds: int = Field(
         default=30,

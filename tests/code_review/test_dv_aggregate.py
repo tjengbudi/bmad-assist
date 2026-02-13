@@ -90,20 +90,17 @@ def dv_result_uncertain():
     )
 
 
-def _make_tasks_info(count: int) -> list[tuple[None, Path, str]]:
-    """Create dummy dv_tasks_info entries."""
-    return [(None, Path(f"/src/file{i}.py"), "python") for i in range(count)]
-
-
 class TestAggregateDvResults:
     """Tests for _aggregate_dv_results helper."""
 
     def test_multiple_files_aggregated(self, dv_result_reject, dv_result_accept):
         """Multiple file results are combined correctly."""
-        dv_results = [dv_result_reject, dv_result_accept]
-        tasks_info = _make_tasks_info(2)
+        batch_result = {
+            Path("/src/file0.py"): dv_result_reject,
+            Path("/src/file1.py"): dv_result_accept,
+        }
 
-        aggregated = _aggregate_dv_results(dv_results, tasks_info)
+        aggregated = _aggregate_dv_results(batch_result)
 
         assert aggregated is not None
         # Findings from both results combined
@@ -121,30 +118,9 @@ class TestAggregateDvResults:
         # Min score
         assert aggregated.score == 2.0
 
-    def test_mixed_exceptions(self, dv_result_accept):
-        """Exceptions in results are skipped, valid results aggregated."""
-        dv_results = [RuntimeError("DV failed"), dv_result_accept]
-        tasks_info = _make_tasks_info(2)
-
-        aggregated = _aggregate_dv_results(dv_results, tasks_info)
-
-        assert aggregated is not None
-        assert len(aggregated.findings) == 1
-        assert aggregated.verdict == VerdictDecision.ACCEPT
-        assert aggregated.duration_ms == 2000
-
-    def test_all_failed_returns_none(self):
-        """All exceptions → returns None."""
-        dv_results = [RuntimeError("fail1"), ValueError("fail2")]
-        tasks_info = _make_tasks_info(2)
-
-        aggregated = _aggregate_dv_results(dv_results, tasks_info)
-
-        assert aggregated is None
-
     def test_empty_results(self):
-        """Empty results list → returns None."""
-        aggregated = _aggregate_dv_results([], [])
+        """Empty results dict → returns None."""
+        aggregated = _aggregate_dv_results({})
 
         assert aggregated is None
 
@@ -152,30 +128,36 @@ class TestAggregateDvResults:
         self, dv_result_reject, dv_result_accept, dv_result_uncertain
     ):
         """REJECT beats UNCERTAIN and ACCEPT."""
-        dv_results = [dv_result_accept, dv_result_uncertain, dv_result_reject]
-        tasks_info = _make_tasks_info(3)
+        batch_result = {
+            Path("/src/file0.py"): dv_result_accept,
+            Path("/src/file1.py"): dv_result_uncertain,
+            Path("/src/file2.py"): dv_result_reject,
+        }
 
-        aggregated = _aggregate_dv_results(dv_results, tasks_info)
+        aggregated = _aggregate_dv_results(batch_result)
 
         assert aggregated is not None
         assert aggregated.verdict == VerdictDecision.REJECT
 
     def test_uncertain_beats_accept(self, dv_result_accept, dv_result_uncertain):
         """UNCERTAIN beats ACCEPT."""
-        dv_results = [dv_result_accept, dv_result_uncertain]
-        tasks_info = _make_tasks_info(2)
+        batch_result = {
+            Path("/src/file0.py"): dv_result_accept,
+            Path("/src/file1.py"): dv_result_uncertain,
+        }
 
-        aggregated = _aggregate_dv_results(dv_results, tasks_info)
+        aggregated = _aggregate_dv_results(batch_result)
 
         assert aggregated is not None
         assert aggregated.verdict == VerdictDecision.UNCERTAIN
 
     def test_single_result(self, dv_result_accept):
         """Single result passes through."""
-        dv_results = [dv_result_accept]
-        tasks_info = _make_tasks_info(1)
+        batch_result = {
+            Path("/src/file0.py"): dv_result_accept,
+        }
 
-        aggregated = _aggregate_dv_results(dv_results, tasks_info)
+        aggregated = _aggregate_dv_results(batch_result)
 
         assert aggregated is not None
         assert aggregated.verdict == VerdictDecision.ACCEPT

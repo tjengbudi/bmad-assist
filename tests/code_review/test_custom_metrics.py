@@ -92,6 +92,27 @@ class TestExtractCodeReviewCustomMetrics:
         # Empty file list should result in None or 0
         assert metrics["file_count"] in (None, 0)
 
+    def test_h3_file_list_header(self, tmp_path: Path) -> None:
+        """### File List is detected for metric extraction."""
+        story_file = tmp_path / "test-story.md"
+        story_file.write_text("""# Story 13.10
+
+### File List
+
+- `src/bmad_assist/code_review/__init__.py`
+- `src/bmad_assist/code_review/orchestrator.py`
+- `tests/code_review/test_orchestrator.py`
+
+### Acceptance Criteria
+
+- AC1: Test passes
+""")
+
+        metrics = _extract_code_review_custom_metrics(story_file)
+
+        assert metrics["phase"] == "code-review"
+        assert metrics["file_count"] == 3
+
     def test_filters_directories_from_count(self, tmp_path: Path) -> None:
         """Test that directories are filtered from file count."""
         story_file = tmp_path / "test-story.md"

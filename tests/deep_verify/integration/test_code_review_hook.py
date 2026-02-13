@@ -10,7 +10,6 @@ from unittest.mock import AsyncMock, MagicMock, patch
 import pytest
 
 from bmad_assist.deep_verify.config import DeepVerifyConfig
-from bmad_assist.deep_verify.core.language_detector import LanguageInfo
 from bmad_assist.deep_verify.core.types import (
     ArtifactDomain,
     DeepVerifyValidationResult,
@@ -29,7 +28,6 @@ from bmad_assist.deep_verify.integration.code_review_hook import (
     run_deep_verify_code_review,
     save_dv_findings_for_synthesis,
 )
-
 
 # =============================================================================
 # Fixtures
@@ -256,10 +254,10 @@ class TestRunDeepVerifyCodeReview:
             assert "RuntimeError:" in result.error
 
     @pytest.mark.asyncio
-    async def test_language_detection_integration(
+    async def test_project_stacks_passed_to_context(
         self, mock_config, temp_project_path, sample_verdict
     ):
-        """Test that language detection is used."""
+        """Test that project_stacks are passed through to VerificationContext."""
         with patch(
             "bmad_assist.deep_verify.integration.code_review_hook.DeepVerifyEngine"
         ) as mock_engine_class:
@@ -267,39 +265,26 @@ class TestRunDeepVerifyCodeReview:
             mock_engine.verify = AsyncMock(return_value=sample_verdict)
             mock_engine_class.return_value = mock_engine
 
-            with patch(
-                "bmad_assist.deep_verify.integration.code_review_hook.LanguageDetector"
-            ) as mock_detector_class:
-                mock_detector = MagicMock()
-                mock_detector.detect.return_value = LanguageInfo(
-                    language="python",
-                    confidence=0.95,
-                    file_type="source",
-                    detection_method="extension",
-                )
-                mock_detector_class.return_value = mock_detector
+            await run_deep_verify_code_review(
+                file_path=Path("src/main.py"),
+                code_content="def test(): pass",
+                config=mock_config,
+                project_path=temp_project_path,
+                epic_num=26,
+                story_num=20,
+                project_stacks=("python", "javascript"),
+            )
 
-                await run_deep_verify_code_review(
-                    file_path=Path("src/main.py"),
-                    code_content="def test(): pass",
-                    config=mock_config,
-                    project_path=temp_project_path,
-                    epic_num=26,
-                    story_num=20,
-                )
-
-                # Verify language detector was called
-                mock_detector.detect.assert_called_once()
-                # Verify engine.verify was called with context containing language
-                call_kwargs = mock_engine.verify.call_args[1]
-                assert call_kwargs.get("context") is not None
-                assert call_kwargs["context"].language == "python"
+            # Verify engine.verify was called with context containing project_stacks
+            call_kwargs = mock_engine.verify.call_args[1]
+            assert call_kwargs.get("context") is not None
+            assert call_kwargs["context"].project_stacks == ("python", "javascript")
 
     @pytest.mark.asyncio
-    async def test_unknown_language_handling(
+    async def test_no_project_stacks_defaults_to_empty(
         self, mock_config, temp_project_path, sample_verdict
     ):
-        """Test handling of unknown language."""
+        """Test that missing project_stacks defaults to empty tuple in context."""
         with patch(
             "bmad_assist.deep_verify.integration.code_review_hook.DeepVerifyEngine"
         ) as mock_engine_class:
@@ -307,26 +292,20 @@ class TestRunDeepVerifyCodeReview:
             mock_engine.verify = AsyncMock(return_value=sample_verdict)
             mock_engine_class.return_value = mock_engine
 
-            with patch(
-                "bmad_assist.deep_verify.integration.code_review_hook.LanguageDetector"
-            ) as mock_detector_class:
-                mock_detector = MagicMock()
-                mock_detector.detect.return_value = LanguageInfo.unknown()
-                mock_detector_class.return_value = mock_detector
+            result = await run_deep_verify_code_review(
+                file_path=Path("src/main.xyz"),
+                code_content="unknown content",
+                config=mock_config,
+                project_path=temp_project_path,
+                epic_num=26,
+                story_num=20,
+            )
 
-                result = await run_deep_verify_code_review(
-                    file_path=Path("src/main.xyz"),
-                    code_content="unknown content",
-                    config=mock_config,
-                    project_path=temp_project_path,
-                    epic_num=26,
-                    story_num=20,
-                )
-
-                assert result.verdict == VerdictDecision.REJECT
-                # Verify context was created with None language
-                call_kwargs = mock_engine.verify.call_args[1]
-                assert call_kwargs["context"].language is None
+            assert result.verdict == VerdictDecision.REJECT
+            # Verify context was created with empty project_stacks and no language
+            call_kwargs = mock_engine.verify.call_args[1]
+            assert call_kwargs["context"].project_stacks == ()
+            assert call_kwargs["context"].language is None
 
     @pytest.mark.asyncio
     async def test_timeout_passed_to_engine(self, mock_config, temp_project_path, sample_verdict):
@@ -402,11 +381,10 @@ class TestResolveCodeFiles:
             mock_get_paths.return_value = mock_paths
             files = _resolve_code_files(temp_project_path, 26, 20)
 
-        assert len(files) == 3
+        assert len(files) == 2  # test_main.py excluded by DVFileFilter
         file_paths = [str(f[0]) for f in files]
         assert any("main.py" in p for p in file_paths)
         assert any("utils.py" in p for p in file_paths)
-        assert any("test_main.py" in p for p in file_paths)
 
     def test_no_story_file(self, temp_project_path, mock_paths):
         """Test when no story file exists."""
@@ -495,6 +473,64 @@ class TestResolveCodeFiles:
         # Should be limited by 100KB max
         total_size = sum(f[0].stat().st_size for f in files)
         assert total_size <= 100 * 1024
+
+
+    def test_h3_file_list_header(self, temp_project_path, mock_paths):
+        """### File List (most common format) is detected."""
+        stories_dir = mock_paths.stories_dir
+        stories_dir.mkdir(parents=True, exist_ok=True)
+        story_file = stories_dir / "26-26-test.md"
+        story_file.write_text("""# Story
+
+### File List
+- `src/file1.py` - A file
+- `src/file2.py` - Another file
+
+### Tasks
+- [ ] Task 1
+""")
+
+        # Create the files
+        src_dir = temp_project_path / "src"
+        src_dir.mkdir(parents=True, exist_ok=True)
+        (src_dir / "file1.py").write_text("# file1")
+        (src_dir / "file2.py").write_text("# file2")
+
+        with patch("bmad_assist.core.paths.get_paths") as mock_get_paths:
+            mock_get_paths.return_value = mock_paths
+            files = _resolve_code_files(temp_project_path, 26, 26)
+
+        assert len(files) == 2
+
+    def test_numbered_list_in_file_list(self, temp_project_path, mock_paths):
+        """Numbered list entries are extracted."""
+        stories_dir = mock_paths.stories_dir
+        stories_dir.mkdir(parents=True, exist_ok=True)
+        story_file = stories_dir / "26-27-test.md"
+        story_file.write_text("""# Story
+
+## File List
+1. `src/first.py` - First file
+2. `src/second.py` - Second file
+
+## Tasks
+- [ ] Task 1
+""")
+
+        # Create the files
+        src_dir = temp_project_path / "src"
+        src_dir.mkdir(parents=True, exist_ok=True)
+        (src_dir / "first.py").write_text("# first")
+        (src_dir / "second.py").write_text("# second")
+
+        with patch("bmad_assist.core.paths.get_paths") as mock_get_paths:
+            mock_get_paths.return_value = mock_paths
+            files = _resolve_code_files(temp_project_path, 26, 27)
+
+        assert len(files) == 2
+        file_paths = [str(f[0]) for f in files]
+        assert any("first.py" in p for p in file_paths)
+        assert any("second.py" in p for p in file_paths)
 
 
 # =============================================================================

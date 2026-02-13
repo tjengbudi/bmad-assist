@@ -47,7 +47,7 @@ from bmad_assist.benchmarking import (
 )
 from bmad_assist.compiler import compile_workflow
 from bmad_assist.compiler.types import CompilerContext
-from bmad_assist.core.config import Config, get_phase_timeout
+from bmad_assist.core.config import Config, get_phase_retries, get_phase_timeout
 from bmad_assist.core.config.loaders import parse_parallel_delay
 from bmad_assist.core.config.models.providers import (
     MultiProviderConfig,
@@ -55,6 +55,7 @@ from bmad_assist.core.config.models.providers import (
 )
 from bmad_assist.core.exceptions import BmadAssistError
 from bmad_assist.core.io import get_original_cwd, save_prompt
+from bmad_assist.core.retry import invoke_with_timeout_retry
 
 # get_paths() NOT used - validations_dir derived from project_path directly
 # to ensure reports are saved to the correct project (not CLI working directory)
@@ -279,6 +280,7 @@ async def _invoke_validator(
     timeout: int,
     provider_id: str,
     model: str,
+    timeout_retries: int | None,
     provider_name: str | None = None,
     allowed_tools: list[str] | None = None,
     run_timestamp: datetime | None = None,
@@ -330,24 +332,23 @@ async def _invoke_validator(
         # Use unified run timestamp for consistency across all validators
         validation_timestamp = run_timestamp or start_time
 
-        # Use asyncio.wait_for with to_thread for ALL providers
-        # This maintains BaseProvider contract boundary
-        # Pass model and allowed_tools to control validator behavior
-        result = await asyncio.wait_for(
-            asyncio.to_thread(
-                provider.invoke,
-                prompt,
-                model=model,
-                timeout=timeout,
-                allowed_tools=allowed_tools,
-                settings_file=settings_file,
-                color_index=color_index,
-                cwd=cwd,
-                display_model=display_model,
-                thinking=thinking,
-                reasoning_effort=reasoning_effort,
-            ),
+        # Use asyncio.to_thread with timeout retry wrapper
+        # invoke_with_timeout_retry handles ProviderTimeoutError with configurable retry
+        result = await asyncio.to_thread(
+            invoke_with_timeout_retry,
+            provider.invoke,
+            timeout_retries=timeout_retries,
+            phase_name="validate_story",
+            prompt=prompt,
+            model=model,
             timeout=timeout,
+            allowed_tools=allowed_tools,
+            settings_file=settings_file,
+            color_index=color_index,
+            cwd=cwd,
+            display_model=display_model,
+            thinking=thinking,
+            reasoning_effort=reasoning_effort,
         )
 
         duration_ms = int((datetime.now(UTC) - start_time).total_seconds() * 1000)
@@ -510,6 +511,7 @@ async def run_validation_phase(
 
     # Step 2: Build list of validators (multi + master)
     timeout = get_phase_timeout(config, "validate_story")
+    timeout_retries = get_phase_retries(config, "validate_story")
     # AC7: Check if benchmarking is enabled
     benchmarking_enabled = should_collect_benchmarking(config)
     if benchmarking_enabled:
@@ -547,6 +549,7 @@ async def run_validation_phase(
             prompt,
             timeout,
             provider_id,
+            timeout_retries=timeout_retries,
             model=multi_config.model,
             provider_name=multi_config.provider,  # Actual provider for benchmarking
             allowed_tools=_VALIDATOR_ALLOWED_TOOLS,
@@ -578,6 +581,7 @@ async def run_validation_phase(
             prompt,
             timeout,
             master_id,
+            timeout_retries=timeout_retries,
             model=config.providers.master.model,
             provider_name=config.providers.master.provider,  # Actual provider for benchmarking
             allowed_tools=_VALIDATOR_ALLOWED_TOOLS,

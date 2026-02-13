@@ -570,3 +570,113 @@ class DomainExpertMethod(BaseVerificationMethod):
             domain=domain,
             evidence=evidence,
         )
+
+    # =========================================================================
+    # Batch Interface
+    # =========================================================================
+
+    @property
+    def supports_batch(self) -> bool:
+        """Whether this method supports batch mode."""
+        return True
+
+    def get_method_prompt(self, **kwargs: object) -> str:
+        """Return method's analysis instructions WITHOUT file content.
+
+        Sent as Turn 1 of multi-turn batch session. Includes the system prompt,
+        knowledge rules section, and JSON format instructions.
+
+        Args:
+            **kwargs: Additional context, may include 'domains' as
+                list[ArtifactDomain] to select knowledge bases.
+
+        Returns:
+            Method instruction prompt string.
+
+        """
+        # Extract domains from kwargs
+        domains: list[ArtifactDomain] | None = None
+        raw_domains = kwargs.get("domains")
+        if isinstance(raw_domains, list):
+            domains = raw_domains
+
+        # Load knowledge base rules (same as analyze())
+        rules = self._loader.load(domains)
+
+        # Build rules section (same logic as _build_prompt)
+        rules_str = "\n\n".join(
+            f"Rule ID: {rule.id}\n"
+            f"Domain: {rule.domain}\n"
+            f"Category: {rule.category.value}\n"
+            f"Title: {rule.title}\n"
+            f"Description: {rule.description}\n"
+            f"Severity if violated: {rule.severity.value}"
+            for rule in rules
+        )
+
+        return (
+            f"{DOMAIN_EXPERT_SYSTEM_PROMPT}\n\n"
+            f"Rules to evaluate against:\n\n"
+            f"{rules_str}\n\n"
+            f"Identify all rule violations in the artifact. For each violation, provide:\n"
+            f"- rule_id: ID of the violated rule\n"
+            f"- rule_title: Title of the violated rule\n"
+            f"- evidence_quote: Code snippet showing the violation\n"
+            f"- line_number: Integer line number or null if not identifiable (NEVER use task IDs, labels, or non-numeric values)\n"
+            f"- violation_explanation: How the artifact violates the rule\n"
+            f"- remediation: How to fix the violation\n"
+            f"- confidence: 0.0-1.0 confidence score\n\n"
+            f"Respond with JSON in this format:\n"
+            f"{{\n"
+            f'    "violations": [\n'
+            f"        {{\n"
+            f'            "rule_id": "SEC-001",\n'
+            f'            "rule_title": "Rule Title",\n'
+            f'            "evidence_quote": "code snippet",\n'
+            f'            "line_number": 42,\n'
+            f'            "violation_explanation": "This violates the rule because...",\n'
+            f'            "remediation": "Fix by...",\n'
+            f'            "confidence": 0.85\n'
+            f"        }}\n"
+            f"    ]\n"
+            f"}}\n\n"
+            f"I will send files one at a time. For each file, analyze against these rules and return the JSON."
+        )
+
+    def parse_file_response(self, raw_response: str, file_path: str) -> list[Finding]:
+        """Parse LLM response for a single file in batch mode.
+
+        Reuses _parse_response() for JSON extraction and
+        _create_finding_from_violation() for finding creation.
+
+        Args:
+            raw_response: Raw LLM response text for one file.
+            file_path: Path to the file that was analyzed.
+
+        Returns:
+            List of Finding objects extracted from the response.
+
+        """
+        try:
+            result = self._parse_response(raw_response)
+
+            # Load rules for finding creation (needed for severity resolution)
+            rules = self._loader.load(None)
+
+            findings: list[Finding] = []
+            finding_idx = 0
+
+            for violation_data in result.violations:
+                if violation_data.confidence >= self._threshold:
+                    finding_idx += 1
+                    findings.append(
+                        self._create_finding_from_violation(violation_data, finding_idx, rules)
+                    )
+
+            return findings
+
+        except (json.JSONDecodeError, ValueError, ValidationError, KeyError) as e:
+            logger.debug(
+                "Failed to parse batch file response for %s: %s", file_path, e
+            )
+            return []

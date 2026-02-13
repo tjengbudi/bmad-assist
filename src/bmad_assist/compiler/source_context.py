@@ -109,14 +109,29 @@ TEST_FILE_PATTERNS: tuple[re.Pattern[str], ...] = (
     re.compile(r".*_spec\.(py|js|ts)$"),
 )
 
-# File List section header pattern
-_FILE_LIST_HEADER = re.compile(r"^#{2,3}\s*File\s+List\s*$", re.MULTILINE | re.IGNORECASE)
+# Header: match any level 2+ heading containing "File List"
+_FILE_LIST_HEADER = re.compile(
+    r"^(#{2,})\s+File\s+List\s*$", re.MULTILINE | re.IGNORECASE
+)
 
-# Pattern for file paths in markdown lists
-_FILE_PATH_PATTERN = re.compile(
-    r"^\s*[-*]\s*`?([^`\s]+\."
-    r"(py|tsx|ts|jsx|js|yaml|yml|json|md|sql|sh|go|rs|java|kt|swift|rb|php|cpp|hpp|c|h))`?",
-    re.MULTILINE,
+# File paths from bullet lists: - `path` or * `path`
+_BULLET_PATH = re.compile(
+    r"^\s*[-*]\s+`([^`\n]+)`", re.MULTILINE
+)
+
+# File paths from numbered lists: 1. `path` or 1) `path`
+_NUMBERED_PATH = re.compile(
+    r"^\s*\d+[.)]\s+`([^`\n]+)`", re.MULTILINE
+)
+
+# File paths from markdown tables: | `path` |
+_TABLE_PATH = re.compile(
+    r"\|\s*`([^`\n]+)`", re.MULTILINE
+)
+
+# Fallback: bullet/numbered with no backticks — first path-like token
+_PLAIN_PATH = re.compile(
+    r"^\s*(?:[-*]|\d+[.)])\s+(\S+\.\w+)", re.MULTILINE
 )
 
 
@@ -164,13 +179,78 @@ class GitDiffFile:
     hunk_ranges: list[tuple[int, int]] = field(default_factory=list)
 
 
+def _extract_file_list_section(content: str) -> str | None:
+    """Find File List heading and extract section content.
+
+    Handles any heading level (##, ###, ####).
+    Section ends at next heading of same-or-higher level.
+    Sub-headers (deeper level) are included.
+
+    Args:
+        content: Full document content.
+
+    Returns:
+        Section content after the heading, or None if not found.
+
+    """
+    header_match = _FILE_LIST_HEADER.search(content)
+    if not header_match:
+        return None
+
+    hash_count = len(header_match.group(1))  # number of #'s
+    section_start = header_match.end()
+
+    # Stop at next heading of same or higher level (≤ hash_count #'s)
+    # (?!#) prevents ## from matching ###
+    boundary = re.compile(
+        rf"^#{{2,{hash_count}}}(?!#)\s", re.MULTILINE
+    )
+    next_section = boundary.search(content[section_start:])
+    if next_section:
+        return content[section_start:section_start + next_section.start()]
+    return content[section_start:]
+
+
+def extract_file_paths_from_section(section_content: str) -> list[str]:
+    """Extract file paths from File List section content.
+
+    Supports: bullet lists, numbered lists, markdown tables,
+    with and without backticks.
+
+    Args:
+        section_content: Content of the File List section (after heading).
+
+    Returns:
+        List of file paths found.
+
+    """
+    paths: list[str] = []
+    seen: set[str] = set()
+
+    # Priority order: backtick patterns first (most precise)
+    for pattern in (_BULLET_PATH, _NUMBERED_PATH, _TABLE_PATH):
+        for m in pattern.finditer(section_content):
+            p = m.group(1).strip()
+            if p and p not in seen:
+                paths.append(p)
+                seen.add(p)
+
+    # Fallback: plain paths (no backticks) — only if nothing found yet
+    if not paths:
+        for m in _PLAIN_PATH.finditer(section_content):
+            p = m.group(1).strip()
+            if p and p not in seen and not p.startswith("#") and not p.startswith("*"):
+                paths.append(p)
+                seen.add(p)
+
+    return paths
+
+
 def extract_file_paths_from_story(story_content: str) -> list[str]:
     """Extract file paths from File List section in story content.
 
-    Parses the "## File List" or "### File List" section and extracts
-    file paths from markdown list items like:
-    - `src/module/file.py` - Description
-    - src/other/file.ts
+    Parses the "## File List", "### File List", etc. section and extracts
+    file paths from markdown list items, numbered lists, and tables.
 
     Args:
         story_content: Full story file content.
@@ -179,26 +259,10 @@ def extract_file_paths_from_story(story_content: str) -> list[str]:
         List of file paths found in the File List section.
 
     """
-    header_match = _FILE_LIST_HEADER.search(story_content)
-    if not header_match:
+    section = _extract_file_list_section(story_content)
+    if not section:
         return []
-
-    # Extract section content (until next ## or ### or end)
-    section_start = header_match.end()
-    next_section = re.search(r"^#{2,3}\s+\w", story_content[section_start:], re.MULTILINE)
-    if next_section:
-        section_content = story_content[section_start : section_start + next_section.start()]
-    else:
-        section_content = story_content[section_start:]
-
-    # Extract file paths from list items
-    paths: list[str] = []
-    for match in _FILE_PATH_PATTERN.finditer(section_content):
-        path = match.group(1).strip()
-        if path and not path.startswith("#"):
-            paths.append(path)
-
-    return paths
+    return extract_file_paths_from_section(section)
 
 
 def is_binary_file(path: Path) -> bool:
@@ -729,6 +793,14 @@ class SourceContextService:
 
         return "".join(output_parts)
 
+    # Suffix-to-language mapping for shared context extractor
+    _SUFFIX_TO_LANGUAGE: dict[str, str] = {
+        ".py": "python",
+        ".js": "javascript",
+        ".ts": "typescript",
+        ".go": "go",
+    }
+
     def _truncate_at_symbol(
         self,
         content: str,
@@ -737,8 +809,8 @@ class SourceContextService:
     ) -> str:
         """Truncate content at symbol boundary.
 
-        For Python files, uses AST to find function/class boundaries.
-        For other files, falls back to line-based truncation.
+        Delegates to shared context extractor for supported languages.
+        Falls back to line-based truncation if extractor unavailable.
 
         Args:
             content: Full content.
@@ -754,16 +826,24 @@ class SourceContextService:
         if len(content) <= max_chars:
             return content
 
-        # For Python files, try symbol-aware truncation
-        if suffix == ".py" and len(content) <= MAX_AST_PARSE_SIZE:
+        # Try shared context extractor for supported languages
+        language = self._SUFFIX_TO_LANGUAGE.get(suffix)
+        if language:
             try:
-                return self._truncate_python_at_symbol(content, max_chars)
-            except (SyntaxError, ValueError) as e:
-                logger.debug("AST parse failed, using line-based: %s", e)
+                from bmad_assist.context.extractor import extract_context
+                from bmad_assist.context.formatter import format_for_source_context
+
+                ctx = extract_context(content, f"file{suffix}", budget=max_chars, language=language)
+                result = format_for_source_context(ctx, max_chars)
+                if result:
+                    return result
+            except (ValueError, ImportError) as e:
+                logger.debug("Shared extractor failed, using line-based: %s", e)
 
         # Line-based truncation fallback
         return self._truncate_at_line(content, max_chars)
 
+    # TODO: remove after context/ module is validated
     def _truncate_python_at_symbol(self, content: str, max_chars: int) -> str:
         """Truncate Python code at function/class boundary.
 
@@ -873,7 +953,7 @@ def get_git_diff_files(
     # Get hunk ranges for each file
     result: list[GitDiffFile] = []
     for path, changes in files:
-        hunk_ranges = _get_hunk_ranges(project_root, path)
+        hunk_ranges = get_hunk_ranges_for_file(project_root, path)
         result.append(
             GitDiffFile(
                 path=path,
@@ -931,7 +1011,7 @@ def _parse_git_stat(stat_output: str) -> list[tuple[str, int]]:
     return result
 
 
-def _get_hunk_ranges(project_root: Path, path: str) -> list[tuple[int, int]]:
+def get_hunk_ranges_for_file(project_root: Path, path: str) -> list[tuple[int, int]]:
     """Get hunk line ranges from git diff for a specific file.
 
     Args:
@@ -939,7 +1019,7 @@ def _get_hunk_ranges(project_root: Path, path: str) -> list[tuple[int, int]]:
         path: File path relative to project root.
 
     Returns:
-        List of (start_line, end_line) tuples.
+        List of (start_line, end_line) tuples (1-indexed inclusive).
 
     """
     try:

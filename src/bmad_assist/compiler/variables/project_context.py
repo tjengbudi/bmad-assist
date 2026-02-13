@@ -17,6 +17,9 @@ from bmad_assist.core.exceptions import VariableError
 
 logger = logging.getLogger(__name__)
 
+# Default project context path when file not found
+DEFAULT_PROJECT_CONTEXT = "{project-root}/docs/project-context.md"
+
 __all__ = [
     "_resolve_project_context",
     "_estimate_tokens",
@@ -55,14 +58,16 @@ def _resolve_project_context(
     # Get output_folder (docs directory)
     output_folder_str = resolved.get("output_folder")
     if not output_folder_str or not isinstance(output_folder_str, str):
-        resolved["project_context"] = "none"
-        logger.debug("No output_folder, set project_context to 'none'")
+        # No output_folder - use default path
+        resolved["project_context"] = {"_value": DEFAULT_PROJECT_CONTEXT}
+        logger.debug("No output_folder, using default project_context path")
         return resolved
 
     output_folder = Path(output_folder_str)
     if not output_folder.exists():
-        resolved["project_context"] = "none"
-        logger.debug("output_folder does not exist, set project_context to 'none'")
+        # output_folder doesn't exist - use default path
+        resolved["project_context"] = {"_value": DEFAULT_PROJECT_CONTEXT}
+        logger.debug("output_folder does not exist, using default project_context path")
         return resolved
 
     # Check both naming conventions
@@ -112,10 +117,16 @@ def _resolve_project_context(
         selected_path = underscore_path
         logger.debug("project_context: found project_context.md")
     else:
-        # Neither exists
-        resolved["project_context"] = "none"
-        logger.debug("No project context file found, set to 'none'")
-        return resolved
+        # Neither exists in output_folder - try fallback to docs/
+        docs_context = context.project_root / "docs" / "project-context.md"
+        if docs_context.exists():
+            selected_path = docs_context
+            logger.debug("project_context: found in docs/ fallback")
+        else:
+            # Use default path (will be resolved later)
+            resolved["project_context"] = {"_value": DEFAULT_PROJECT_CONTEXT}
+            logger.debug("No project context file found, using default path: %s", DEFAULT_PROJECT_CONTEXT)
+            return resolved
 
     # Create attributed variable with token estimate
     token_estimate = _estimate_tokens(selected_path)

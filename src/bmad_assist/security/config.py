@@ -114,3 +114,8 @@ class SecurityAgentConfig(BaseModel):
         le=100,
         description="Maximum findings to include in synthesis prompt",
     )
+    retries: int | None = Field(
+        default=None,
+        ge=0,
+        description="Retry provider invocation on timeout (None=no retry, 0=infinite, N=specific count)",
+    )

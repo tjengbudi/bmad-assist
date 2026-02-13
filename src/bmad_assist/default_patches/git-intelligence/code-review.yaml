@@ -1,0 +1,21 @@
+# Git intelligence for code-review workflow
+# Focus: Story files and recent implementation changes
+
+extends: common.yaml
+
+phase_commands:
+  - name: "Recent Story File Commits"
+    description: "Recent commits affecting the story being reviewed"
+    command: "git log --oneline -5 -- '**/{{epic_num}}-{{story_num}}-*.md' 2>/dev/null || echo '(no history)'"
+
+  - name: "Recent Commits (all files)"
+    description: "Recent commits across the project"
+    command: "git log --oneline -10"
+
+  - name: "Current Branch Status"
+    description: "Current git branch and status"
+    command: "git status --short"
+
+  - name: "Source Changes for Review"
+    description: "Modified source files (excluding tests)"
+    command: "git diff --name-only -- '*.py' '*.js' '*.ts' '*.go' '*.rs'"

@@ -11,10 +11,12 @@ import json
 import logging
 import re
 import time
+from functools import partial
 from pathlib import Path
 from typing import TYPE_CHECKING
 
 from bmad_assist.core.exceptions import BmadAssistError, ProviderError, ProviderTimeoutError
+from bmad_assist.core.retry import invoke_with_timeout_retry
 from bmad_assist.security.report import SecurityFinding, SecurityReport
 
 if TYPE_CHECKING:
@@ -55,6 +57,9 @@ async def run_security_review(
     """
     start_time = time.perf_counter()
 
+    # Get timeout retry configuration from security_agent config
+    timeout_retries = config.security_agent.retries
+
     try:
         # Resolve provider
         provider, model, settings_file, thinking, reasoning_effort = _resolve_provider(config)
@@ -66,14 +71,18 @@ async def run_security_review(
             timeout,
         )
 
-        # Invoke provider (synchronous call wrapped in asyncio)
+        # Invoke provider with timeout retry (synchronous call wrapped in asyncio)
         import asyncio
 
         loop = asyncio.get_running_loop()
         result = await loop.run_in_executor(
             None,
-            lambda: provider.invoke(
-                compiled_prompt,
+            partial(
+                invoke_with_timeout_retry,
+                provider.invoke,
+                timeout_retries=timeout_retries,
+                phase_name="security_review",
+                prompt=compiled_prompt,
                 model=model,
                 timeout=timeout,
                 settings_file=settings_file,
@@ -189,7 +198,7 @@ def _parse_security_output(output: str) -> list[SecurityFinding]:
     """Parse structured security report from LLM output.
 
     Extracts JSON between SECURITY_REPORT_START/END markers.
-    Falls back to trying to find JSON block in output.
+    Falls back to JSON block, then raw JSON object, then markdown parsing.
 
     Args:
         output: Raw LLM output string.
@@ -206,12 +215,12 @@ def _parse_security_output(output: str) -> list[SecurityFinding]:
         json_str = output[start_idx + len(SECURITY_REPORT_START):end_idx].strip()
         return _parse_findings_json(json_str)
 
-    # Fallback: find JSON block in output (```json ... ```)
+    # Fallback 1: find JSON block in output (```json ... ```)
     json_match = re.search(r"```json\s*\n(.*?)\n```", output, re.DOTALL)
     if json_match:
         return _parse_findings_json(json_match.group(1))
 
-    # Last resort: try to find raw JSON object
+    # Fallback 2: try to find raw JSON object
     json_match = re.search(r'\{\s*"findings"\s*:', output, re.DOTALL)
     if json_match:
         # Find matching closing brace
@@ -225,8 +234,43 @@ def _parse_security_output(output: str) -> list[SecurityFinding]:
                 if depth == 0:
                     return _parse_findings_json(output[brace_start:i + 1])
 
-    logger.warning("Could not extract structured security report from output")
-    return []
+    # Fallback 3: try to parse markdown format (no findings found)
+    # If output contains "no vulnerabilities" or similar, return empty list
+    output_lower = output.lower()
+    no_vuln_phrases = [
+        "no vulnerabilities",
+        "no security issues",
+        "no security vulnerabilities",
+        "0 findings",
+        "zero findings",
+        "no issues found",
+        "no findings found",
+    ]
+    if any(phrase in output_lower for phrase in no_vuln_phrases):
+        logger.info("Parsed 'no vulnerabilities' from markdown security report")
+        return []
+
+    # Fallback 4: create raw output finding so nothing is lost
+    # This captures the full output when we can't parse it properly
+    logger.warning(
+        "Could not extract structured security report, "
+        "creating raw output finding to preserve full response"
+    )
+    # Truncate raw output to avoid massive findings
+    raw_preview = output[:5000] if len(output) > 5000 else output
+    return [
+        SecurityFinding(
+            id="SEC-RAW-001",
+            file_path="raw_output",
+            line_number=0,
+            cwe_id="CWE-UNKNOWN",
+            severity="INFO",
+            title="Security Review Output (Unstructured)",
+            description=f"Structured parsing failed. Full output preserved:\n\n{raw_preview}",
+            remediation="Review the raw output above manually.",
+            confidence=1.0,
+        )
+    ]
 
 
 def _parse_findings_json(json_str: str) -> list[SecurityFinding]:

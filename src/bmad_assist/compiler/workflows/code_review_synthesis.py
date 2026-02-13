@@ -497,13 +497,16 @@ Output format:
             # Step 2: Validate inputs early
             self.validate_context(context)
 
-            # Step 3: Extract invocation params
+            # Step 3: Extract invocation params and preserve handler-provided variables
+            # (resolve_variables will replace context.resolved_variables, so save these now)
             epic_num = context.resolved_variables.get("epic_num")
             story_num = context.resolved_variables.get("story_num")
             session_id = context.resolved_variables.get("session_id")
             reviews: list[AnonymizedValidation] = context.resolved_variables.get(
                 "anonymized_reviews", []
             )
+            dv_findings = context.resolved_variables.get("deep_verify_findings")
+            security_findings = context.resolved_variables.get("security_findings")
 
             # Step 3b: Resolve ALL workflow variables (communication_language, etc.)
             invocation_params = {
@@ -536,6 +539,12 @@ Output format:
                 }
             )
 
+            # Add handler-provided variables (not computed by resolve_variables)
+            if dv_findings:
+                resolved["deep_verify_findings"] = dv_findings
+            if security_findings:
+                resolved["security_findings"] = security_findings
+
             if logger.isEnabledFor(logging.DEBUG):
                 logger.debug("Resolved %d variables", len(resolved))
 
@@ -545,6 +554,12 @@ Output format:
             # Step 5b: Remove git_diff from resolved (it's in context_files, not variables)
             # This prevents HTML escaping of the diff content in the <variables> section
             resolved.pop("git_diff", None)
+
+            # Step 5c: Remove variables already embedded as context files to avoid duplication
+            # Deep Verify findings are embedded as [Deep Verify Findings] file
+            resolved.pop("deep_verify_findings", None)
+            # Security findings are embedded as [Security Findings] file
+            resolved.pop("security_findings", None)
 
             # Step 6: Build synthesis mission
             mission = self._build_synthesis_mission(resolved)

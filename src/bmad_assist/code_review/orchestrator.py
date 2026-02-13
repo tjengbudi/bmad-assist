@@ -45,7 +45,7 @@ from bmad_assist.benchmarking import (
 )
 from bmad_assist.compiler import compile_workflow
 from bmad_assist.compiler.types import CompilerContext
-from bmad_assist.core.config import Config, get_phase_timeout
+from bmad_assist.core.config import Config, get_phase_retries, get_phase_timeout
 from bmad_assist.core.config.loaders import parse_parallel_delay
 from bmad_assist.core.config.models.providers import (
     MultiProviderConfig,
@@ -60,11 +60,12 @@ from bmad_assist.core.loop.dashboard_events import (
     emit_security_review_started,
 )
 from bmad_assist.core.paths import get_paths
+from bmad_assist.core.retry import invoke_with_timeout_retry
 from bmad_assist.core.types import EpicId
 from bmad_assist.deep_verify.core.types import DeepVerifyValidationResult
 from bmad_assist.deep_verify.integration import (
     _resolve_code_files,
-    run_deep_verify_code_review,
+    run_deep_verify_code_review_batch,
     save_dv_findings_for_synthesis,
 )
 from bmad_assist.providers import get_provider
@@ -285,6 +286,7 @@ async def _invoke_reviewer(
     timeout: int,
     reviewer_id: str,
     model: str,
+    timeout_retries: int | None,
     allowed_tools: list[str] | None = None,
     run_timestamp: datetime | None = None,
     epic_num: EpicId = 0,
@@ -330,21 +332,22 @@ async def _invoke_reviewer(
         start_time = datetime.now(UTC)
         review_timestamp = run_timestamp or start_time
 
-        result = await asyncio.wait_for(
-            asyncio.to_thread(
-                provider.invoke,
-                prompt,
-                model=model,
-                timeout=timeout,
-                allowed_tools=allowed_tools,
-                settings_file=settings_file,
-                color_index=color_index,
-                cwd=cwd,
-                display_model=display_model,
-                thinking=thinking,
-                reasoning_effort=reasoning_effort,
-            ),
+        # Use asyncio.to_thread with timeout retry wrapper
+        result = await asyncio.to_thread(
+            invoke_with_timeout_retry,
+            provider.invoke,
+            timeout_retries=timeout_retries,
+            phase_name="code_review",
+            prompt=prompt,
+            model=model,
             timeout=timeout,
+            allowed_tools=allowed_tools,
+            settings_file=settings_file,
+            color_index=color_index,
+            cwd=cwd,
+            display_model=display_model,
+            thinking=thinking,
+            reasoning_effort=reasoning_effort,
         )
 
         duration_ms = int((datetime.now(UTC) - start_time).total_seconds() * 1000)
@@ -484,15 +487,15 @@ def _extract_code_review_custom_metrics(
         return custom
 
     # Extract file count from File List section
-    file_list_match = re.search(
-        r"## File List.*?(?=## |$)",
-        content,
-        re.DOTALL,
+    from bmad_assist.compiler.source_context import (
+        _extract_file_list_section,
+        extract_file_paths_from_section,
     )
-    if file_list_match:
-        file_lines = re.findall(r"[-*]\s+`?([^`\n]+)`?", file_list_match.group())
-        # Filter to actual source files (not directories)
-        source_files = [f for f in file_lines if re.search(r"\.\w+$", f.strip())]
+
+    file_list_content = _extract_file_list_section(content)
+    if file_list_content:
+        file_paths = extract_file_paths_from_section(file_list_content)
+        source_files = [f for f in file_paths if re.search(r"\.\w+$", f.strip())]
         custom["file_count"] = len(source_files) if source_files else None
 
     return custom
@@ -521,8 +524,7 @@ def _resolve_story_file(
 
 
 def _aggregate_dv_results(
-    dv_results: list[Any],
-    dv_tasks_info: list[tuple[Any, Path, str]],
+    dv_batch_result: dict[Path, DeepVerifyValidationResult],
 ) -> DeepVerifyValidationResult | None:
     """Aggregate per-file DV results into a single combined result.
 
@@ -530,8 +532,7 @@ def _aggregate_dv_results(
     but operates on in-memory results without disk I/O.
 
     Args:
-        dv_results: Raw results from asyncio.gather (may include exceptions).
-        dv_tasks_info: Task info tuples (task, file_path, language).
+        dv_batch_result: Dict mapping file_path → DeepVerifyValidationResult.
 
     Returns:
         Aggregated DeepVerifyValidationResult if any valid results, None otherwise.
@@ -546,12 +547,7 @@ def _aggregate_dv_results(
     worst_verdict: VerdictDecision | None = None
     min_score = 100.0
 
-    for idx, dv_result in enumerate(dv_results):
-        if isinstance(dv_result, Exception):
-            continue
-        if not isinstance(dv_result, DeepVerifyValidationResult):
-            continue
-
+    for dv_result in dv_batch_result.values():
         all_findings.extend(dv_result.findings)
         all_domains.extend(dv_result.domains_detected)
         all_methods.update(str(m) for m in dv_result.methods_executed)
@@ -633,6 +629,7 @@ async def run_code_review_phase(
 
     # Step 2: Build list of reviewers (multi + master)
     timeout = get_phase_timeout(config, "code_review")
+    timeout_retries = get_phase_retries(config, "code_review")
     benchmarking_enabled = should_collect_benchmarking(config)
     if benchmarking_enabled:
         logger.debug("Benchmarking enabled - will collect metrics")
@@ -643,29 +640,51 @@ async def run_code_review_phase(
     dv_enabled = (
         hasattr(config, "deep_verify") and config.deep_verify and config.deep_verify.enabled
     )
-    dv_tasks_info: list[tuple[asyncio.Task[DeepVerifyValidationResult], Path, str]] = []
+    dv_batch_task: asyncio.Task[dict[Path, DeepVerifyValidationResult]] | None = None
+    dv_batch_files_info: list[tuple[Path, str]] = []  # (file_path, language) for result mapping
     if dv_enabled:
         logger.debug("Deep Verify enabled - discovering code files")
         code_files = _resolve_code_files(project_path, epic_num, story_num)
         if code_files:
-            logger.info("Running Deep Verify on %d code files", len(code_files))
+            logger.info("Running batch Deep Verify on %d code files", len(code_files))
+            # Build batch file list
+            batch_files: list[tuple[Path, str]] = []
             for file_path, language in code_files:
                 try:
                     code_content = file_path.read_text(encoding="utf-8")
-                    dv_coro = run_deep_verify_code_review(
-                        file_path=file_path,
-                        code_content=code_content,
+                    batch_files.append((file_path, code_content))
+                    dv_batch_files_info.append((file_path, language))
+                except OSError as e:
+                    logger.warning("Failed to read file for DV: %s - %s", file_path, e)
+
+            # Get hunk ranges for each file (for intelligent context extraction)
+            file_hunk_ranges: dict[Path, list[tuple[int, int]]] = {}
+            try:
+                from bmad_assist.compiler.source_context import get_hunk_ranges_for_file
+
+                for fp, _content in batch_files:
+                    try:
+                        rel_path = str(fp.relative_to(project_path))
+                        ranges = get_hunk_ranges_for_file(project_path, rel_path)
+                        if ranges:
+                            file_hunk_ranges[fp] = ranges
+                    except (OSError, ValueError):
+                        logger.debug("Could not get hunk ranges for %s", fp.name)
+            except ImportError:
+                logger.debug("source_context not available for hunk ranges")
+
+            if batch_files:
+                dv_batch_task = asyncio.create_task(
+                    run_deep_verify_code_review_batch(
+                        files=batch_files,
                         config=config,
                         project_path=project_path,
                         epic_num=epic_num,
                         story_num=story_num,
-                        timeout=timeout,
+                        base_timeout=timeout,
+                        file_hunk_ranges=file_hunk_ranges or None,
                     )
-                    # Create task and track with file info
-                    dv_task = asyncio.create_task(dv_coro)
-                    dv_tasks_info.append((dv_task, file_path, language))
-                except OSError as e:
-                    logger.warning("Failed to read file for DV: %s - %s", file_path, e)
+                )
         else:
             logger.debug("No code files found for Deep Verify")
     else:
@@ -690,6 +709,7 @@ async def run_code_review_phase(
             prompt,
             timeout,
             reviewer_id,
+            timeout_retries=timeout_retries,
             model=multi_config.model,
             allowed_tools=_REVIEWER_ALLOWED_TOOLS,
             run_timestamp=run_timestamp,
@@ -721,6 +741,7 @@ async def run_code_review_phase(
             prompt,
             timeout,
             master_id,
+            timeout_retries=timeout_retries,
             model=config.providers.master.model,
             allowed_tools=_REVIEWER_ALLOWED_TOOLS,
             run_timestamp=run_timestamp,
@@ -777,19 +798,23 @@ async def run_code_review_phase(
 
     logger.info("Invoking %d reviewers in parallel", len(tasks))
 
-    # Step 3: Run all reviewers (and DV + security tasks) in parallel
-    # Combine regular reviewer tasks with DV tasks and optional security task
-    all_tasks: list[asyncio.Task[Any]] = tasks + [t[0] for t in dv_tasks_info]
+    # Step 3: Run all reviewers (and DV batch + security tasks) in parallel
+    all_tasks: list[asyncio.Task[Any]] = list(tasks)
+    if dv_batch_task is not None:
+        all_tasks.append(dv_batch_task)
     if security_task is not None:
         all_tasks.append(security_task)
     results = await asyncio.gather(*all_tasks, return_exceptions=True)
 
-    # Split results: regular reviewers vs DV vs security
+    # Split results: regular reviewers vs DV batch vs security
     reviewer_results: list[_ReviewerResult | BaseException] = results[: len(tasks)]
-    dv_end_idx = len(tasks) + len(dv_tasks_info)
-    dv_results = results[len(tasks):dv_end_idx]
+    next_idx = len(tasks)
+    dv_batch_result: dict[Path, DeepVerifyValidationResult] | BaseException | None = None
+    if dv_batch_task is not None:
+        dv_batch_result = results[next_idx]
+        next_idx += 1
     security_result: SecurityReport | BaseException | None = (
-        results[dv_end_idx] if security_task is not None else None
+        results[next_idx] if security_task is not None else None
     )
 
     # Step 4: Collect successful results (regular reviewers)
@@ -823,42 +848,46 @@ async def run_code_review_phase(
     # Note: anonymize_validations() logs internally (Anonymizing N outputs, assignments, session ID)
     anonymized, mapping = anonymize_validations(successful_outputs, run_timestamp=run_timestamp)
 
-    # Process DV results and save to cache (using session_id from mapping)
+    # Process DV batch results and save to cache (using session_id from mapping)
     dv_findings_saved = 0
-    for idx, dv_result in enumerate(dv_results):
-        file_path, language = dv_tasks_info[idx][1], dv_tasks_info[idx][2]
-        if isinstance(dv_result, Exception):
-            logger.warning("DV task failed for %s: %s", file_path, dv_result)
-            continue
-        if isinstance(dv_result, DeepVerifyValidationResult):
-            try:
-                save_dv_findings_for_synthesis(
-                    result=dv_result,
-                    project_path=project_path,
-                    session_id=mapping.session_id,
-                    file_path=file_path,
-                    language=language,
-                )
-                dv_findings_saved += 1
-                logger.debug("Saved DV findings for %s", file_path)
-            except OSError as e:
-                logger.warning("Failed to save DV findings for %s: %s", file_path, e)
+    dv_result_dict: dict[Path, DeepVerifyValidationResult] = {}
+    if dv_batch_result is not None:
+        if isinstance(dv_batch_result, BaseException):
+            logger.warning("DV batch task failed: %s", dv_batch_result)
+        elif isinstance(dv_batch_result, dict):
+            dv_result_dict = dv_batch_result
+            # Build language lookup from dv_batch_files_info
+            language_map: dict[Path, str] = dict(dv_batch_files_info)
+            for file_path, dv_result in dv_result_dict.items():
+                language = language_map.get(file_path, "unknown")
+                try:
+                    save_dv_findings_for_synthesis(
+                        result=dv_result,
+                        project_path=project_path,
+                        session_id=mapping.session_id,
+                        file_path=file_path,
+                        language=language,
+                    )
+                    dv_findings_saved += 1
+                    logger.debug("Saved DV findings for %s", file_path)
+                except OSError as e:
+                    logger.warning("Failed to save DV findings for %s: %s", file_path, e)
 
-    # Save archival DV report to deep-verify/ (aggregated across all files)
-    if dv_findings_saved > 0:
+    # Save archival DV report to deep-verify/ (consolidated per-file breakdown)
+    if dv_findings_saved > 0 and dv_result_dict:
         try:
-            from bmad_assist.deep_verify.integration.reports import save_deep_verify_report
+            from bmad_assist.deep_verify.integration.reports import (
+                save_deep_verify_batch_report,
+            )
 
-            aggregated = _aggregate_dv_results(dv_results, dv_tasks_info)
-            if aggregated is not None:
-                dv_dir = get_paths().deep_verify_dir
-                save_deep_verify_report(
-                    result=aggregated,
-                    epic=epic_num,
-                    story=story_num,
-                    output_dir=dv_dir,
-                    phase_type="code-review",
-                )
+            dv_dir = get_paths().deep_verify_dir
+            save_deep_verify_batch_report(
+                batch_results=dv_result_dict,
+                epic=epic_num,
+                story=story_num,
+                output_dir=dv_dir,
+                phase_type="code-review",
+            )
         except Exception as e:
             logger.warning("Failed to save archival DV report: %s", e)
 

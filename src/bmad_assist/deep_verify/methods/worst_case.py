@@ -834,3 +834,106 @@ class WorstCaseMethod(BaseVerificationMethod):
             return detected_domains[0]
 
         return None
+
+    # =========================================================================
+    # Batch Interface
+    # =========================================================================
+
+    @property
+    def supports_batch(self) -> bool:
+        """Whether this method supports batch mode."""
+        return True
+
+    def get_method_prompt(self, **kwargs: object) -> str:
+        """Return method's analysis instructions WITHOUT file content.
+
+        Sent as Turn 1 of multi-turn batch session. Includes the system prompt,
+        category descriptions, and JSON format instructions.
+
+        Args:
+            **kwargs: Additional context (unused for this method).
+
+        Returns:
+            Method instruction prompt string.
+
+        """
+        # Build category descriptions (same logic as _build_prompt)
+        category_descriptions = []
+        for cat in self._categories:
+            definition = WORST_CASE_CATEGORIES[cat]
+            category_descriptions.append(f"- {cat.value.upper()}: {definition.description}")
+            # Add examples for clarity
+            for example in definition.examples[:2]:
+                category_descriptions.append(f"    Example: {example}")
+
+        categories_str = "\n".join(category_descriptions)
+
+        return (
+            f"{WORST_CASE_CONSTRUCTION_SYSTEM_PROMPT}\n\n"
+            f"Categories to analyze:\n"
+            f"{categories_str}\n\n"
+            f"Construct worst-case failure scenarios for this artifact. "
+            f"For each scenario, provide:\n"
+            f"- scenario: Description of the worst-case failure scenario\n"
+            f"- category: One of [cascade, exhaustion, thundering_herd, corruption, split_brain]\n"
+            f"- severity: One of [catastrophic, severe, moderate, minor]\n"
+            f"- trigger: What conditions trigger this scenario\n"
+            f"- cascade_effect: How the failure propagates and impacts the system\n"
+            f"- evidence_quote: Code snippet showing where vulnerability exists\n"
+            f"- line_number: Integer line number or null if not identifiable (NEVER use task IDs, labels, or non-numeric values)\n"
+            f"- mitigation: How to prevent or mitigate the scenario\n\n"
+            f"Respond with JSON in this format:\n"
+            f"{{\n"
+            f'    "scenarios": [\n'
+            f"        {{\n"
+            f'            "scenario": "Description...",\n'
+            f'            "category": "exhaustion",\n'
+            f'            "severity": "catastrophic",\n'
+            f'            "trigger": "When unbounded input is received...",\n'
+            f'            "cascade_effect": "Service crashes, causing cascading failures...",\n'
+            f'            "evidence_quote": "code snippet",\n'
+            f'            "line_number": 42,\n'
+            f'            "mitigation": "Add bounds checking and backpressure..."\n'
+            f"        }}\n"
+            f"    ]\n"
+            f"}}\n\n"
+            f"I will send files one at a time. For each file, analyze and return the JSON."
+        )
+
+    def parse_file_response(self, raw_response: str, file_path: str) -> list[Finding]:
+        """Parse LLM response for a single file in batch mode.
+
+        Reuses _parse_response() for JSON extraction and
+        _create_finding_from_scenario() for finding creation.
+
+        Args:
+            raw_response: Raw LLM response text for one file.
+            file_path: Path to the file that was analyzed.
+
+        Returns:
+            List of Finding objects extracted from the response.
+
+        """
+        try:
+            result = self._parse_response(raw_response)
+
+            findings: list[Finding] = []
+            finding_idx = 0
+
+            for scenario_data in result.scenarios:
+                confidence = severity_to_confidence(ScenarioSeverity(scenario_data.severity))
+                if confidence >= self._threshold:
+                    finding_idx += 1
+                    findings.append(
+                        self._create_finding_from_scenario(
+                            scenario_data, finding_idx, []
+                        )
+                    )
+
+            return findings
+
+        except (json.JSONDecodeError, ValueError, ValidationError, KeyError) as e:
+            logger.debug(
+                "Failed to parse batch file response for %s: %s", file_path, e
+            )
+            return []

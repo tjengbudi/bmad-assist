@@ -510,6 +510,34 @@ def get_phase_timeout(config: Config, phase: str) -> int:
     return config.timeout
 
 
+def get_phase_retries(config: Config, phase: str) -> int | None:
+    """Get retry count for a specific workflow phase on timeout.
+
+    Args:
+        config: Application configuration.
+        phase: Phase name (e.g., 'validate_story', 'code_review').
+
+    Returns:
+        retries value (None = skip retry, 0 = infinite, N = specific count).
+
+    Example:
+        >>> retries = get_phase_retries(config, "dev_story")
+        >>> if retries is None:
+        ...     # No retry on timeout
+        ...     pass
+        >>> elif retries == 0:
+        ...     # Infinite retry (until overall timeout)
+        ...     pass
+        >>> else:
+        ...     # Specific number of retries
+        ...     pass
+
+    """
+    if config.timeouts is not None:
+        return config.timeouts.get_retries(phase)
+    return None  # No retry by default for legacy config
+
+
 def reload_config(project_path: Path | None = None) -> Config:
     """Reload configuration singleton without restart.
 

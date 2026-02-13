@@ -13,18 +13,12 @@ compatibility:
 
 git_intelligence:
   enabled: true
+  inherit_from: code-review  # Load from git-intelligence/code-review.yaml
   embed_marker: "git-intelligence"
   no_git_message: |
     This project is not under git version control.
     Do NOT attempt to run git commands - they will fail.
     Focus on embedded context and file reading instead.
-  commands:
-    - name: "Recent Commits (last 5)"
-      command: "git log --oneline -5"
-    - name: "Story File History"
-      command: "git log --oneline -3 -- '**/{{epic_num}}-{{story_num}}-*.md' 2>/dev/null || echo '(no history)'"
-    # NOTE: git diff is embedded separately as [git-diff] in context files
-    # Excluding docs/*.md from diff is handled by _capture_git_diff in code_review.py
 
 transforms:
   # === STEP REMOVAL (handled by compiler) ===

@@ -30,16 +30,20 @@ from typing import Any
 import yaml
 from jinja2 import Template
 
-from bmad_assist.core.config import Config, get_phase_timeout
+from bmad_assist.core.config import Config, get_phase_retries, get_phase_timeout
 from bmad_assist.core.config.models.providers import (
     MasterProviderConfig,
     MultiProviderConfig,
     get_phase_provider_config,
 )
-from bmad_assist.core.exceptions import ConfigError, ProviderExitCodeError
+from bmad_assist.core.exceptions import (
+    ConfigError,
+    ProviderExitCodeError,
+)
 from bmad_assist.core.io import get_original_cwd
 from bmad_assist.core.loop.types import PhaseResult
 from bmad_assist.core.paths import get_paths
+from bmad_assist.core.retry import invoke_with_timeout_retry
 from bmad_assist.core.state import State
 from bmad_assist.providers import get_provider
 from bmad_assist.providers.base import BaseProvider, ProviderResult
@@ -666,6 +670,9 @@ class BaseHandler(ABC):
         if settings_file:
             logger.debug("Using settings file: %s", settings_file)
 
+        # Get timeout retry configuration
+        timeout_retries = get_phase_retries(self.config, self.phase_name)
+
         last_error: ProviderExitCodeError | None = None
         start_time = time.time()
         max_duration = retry_timeout_minutes * 60  # Convert to seconds
@@ -690,8 +697,12 @@ class BaseHandler(ABC):
             reasoning_effort = self._get_reasoning_effort()
 
             try:
-                return provider.invoke(
-                    prompt,
+                # Use shared timeout retry wrapper for provider invocation
+                return invoke_with_timeout_retry(
+                    provider.invoke,
+                    timeout_retries=timeout_retries,
+                    phase_name=self.phase_name,
+                    prompt=prompt,
                     model=cli_model,
                     display_model=display_model,
                     timeout=timeout,
@@ -699,6 +710,7 @@ class BaseHandler(ABC):
                     cwd=self.project_path,
                     reasoning_effort=reasoning_effort,
                 )
+
             except ProviderExitCodeError as e:
                 last_error = e
 

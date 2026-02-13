@@ -12,6 +12,8 @@ from bmad_assist.compiler.source_context import (
     GitDiffFile,
     ScoredFile,
     SourceContextService,
+    _extract_file_list_section,
+    extract_file_paths_from_section,
     extract_file_paths_from_story,
     get_git_diff_files,
     is_binary_file,
@@ -167,6 +169,86 @@ class TestExtractFilePathsFromStory:
 
         assert "src/plain/path.ts" in paths
         assert "tests/another.py" in paths
+
+    def test_numbered_list_format(self) -> None:
+        """Numbered lists (1. `file`) are extracted."""
+        story = """## File List
+
+1. `src/module.py` - Main module
+2. `src/utils.py` - Utility functions
+
+## Other
+"""
+        paths = extract_file_paths_from_story(story)
+
+        assert len(paths) == 2
+        assert "src/module.py" in paths
+        assert "src/utils.py" in paths
+
+    def test_table_format(self) -> None:
+        """Markdown table entries (| `file` |) are extracted."""
+        story = """## File List
+
+| File | Description |
+|------|-------------|
+| `src/main.py` | Entry point |
+| `src/config.py` | Configuration |
+
+## Other
+"""
+        paths = extract_file_paths_from_story(story)
+
+        assert len(paths) == 2
+        assert "src/main.py" in paths
+        assert "src/config.py" in paths
+
+    def test_subheaders_within_file_list(self) -> None:
+        """Sub-headers (### Modified Files under ## File List) don't terminate section."""
+        story = """## File List
+
+### Modified Files
+- `src/module.py`
+
+### New Files
+- `src/new_module.py`
+
+## Other Section
+"""
+        paths = extract_file_paths_from_story(story)
+
+        assert len(paths) == 2
+        assert "src/module.py" in paths
+        assert "src/new_module.py" in paths
+
+    def test_h4_header(self) -> None:
+        """#### File List is matched."""
+        story = """#### File List
+
+- `src/deep.py`
+
+#### Other
+"""
+        paths = extract_file_paths_from_story(story)
+
+        assert len(paths) == 1
+        assert "src/deep.py" in paths
+
+    def test_mixed_formats(self) -> None:
+        """Mix of bullets, numbered, and table entries in same section."""
+        story = """## File List
+
+- `src/bullet.py` - From bullet
+1. `src/numbered.py` - From numbered
+| `src/table.py` | From table |
+
+## Other
+"""
+        paths = extract_file_paths_from_story(story)
+
+        assert len(paths) == 3
+        assert "src/bullet.py" in paths
+        assert "src/numbered.py" in paths
+        assert "src/table.py" in paths
 
     def test_returns_empty_for_no_section(self) -> None:
         """Returns empty list when no File List section."""

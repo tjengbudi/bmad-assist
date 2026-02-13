@@ -67,6 +67,62 @@ class BaseVerificationMethod(ABC):
         """
         ...
 
+    def get_method_prompt(self, **kwargs: object) -> str:
+        """Return method's analysis instructions WITHOUT file content.
+
+        Sent as Turn 1 of multi-turn batch session. Override in subclasses
+        that support batch mode.
+
+        Args:
+            **kwargs: Additional context, may include 'domains'.
+
+        Returns:
+            Method instruction prompt string.
+
+        Raises:
+            NotImplementedError: If method doesn't support batch mode.
+
+        """
+        raise NotImplementedError(f"{self.__class__.__name__} does not support batch mode")
+
+    def get_file_prompt(self, file_path: str, content: str) -> str:
+        """Return per-file prompt for Turn 2..N of batch session.
+
+        Args:
+            file_path: Path to the file being analyzed.
+            content: File content to analyze.
+
+        Returns:
+            Formatted file analysis prompt.
+
+        """
+        return (
+            f"Analyze this file:\n"
+            f"=== FILE: {file_path} ===\n{content}\n=== END ===\n\n"
+            f"Return your findings in the same JSON format as instructed."
+        )
+
+    def parse_file_response(self, raw_response: str, file_path: str) -> list[Finding]:
+        """Parse LLM response for a single file in batch mode.
+
+        Args:
+            raw_response: Raw LLM response text for one file.
+            file_path: Path to the file that was analyzed.
+
+        Returns:
+            List of Finding objects extracted from the response.
+
+        Raises:
+            NotImplementedError: If method doesn't support batch mode.
+
+        """
+        raise NotImplementedError(f"{self.__class__.__name__} does not support batch mode")
+
+    @property
+    def supports_batch(self) -> bool:
+        """Whether this method supports batch mode."""
+        return False
+
     def __repr__(self) -> str:
         """Return a string representation of the method."""
         method_id = getattr(self, "method_id", "unknown")

@@ -1,0 +1,334 @@
+# Deep Verify file exclusions by tech stack.
+#
+# Files matching these patterns are skipped during DV scanning because they
+# are non-code, generated, vendored, or configuration that DV cannot
+# meaningfully analyze.
+#
+# Each stack section can contain:
+#   extensions:   - list of file extensions (with dot, case-insensitive)
+#   directories:  - list of directory path segments (matched anywhere in path)
+#   filenames:    - list of exact file names (basename match)
+#   patterns:     - list of regex patterns (matched against relative path)
+#
+# The "common" section always applies. Stack-specific sections are additive.
+# Stack identifiers match security/tech_stack.py output: python, javascript,
+# go, java, rust, ruby, csharp, cpp, swift.
+
+common:
+  extensions:
+    # Documentation
+    - ".md"
+    - ".txt"
+    - ".rst"
+    - ".adoc"
+    # Data / serialization
+    - ".csv"
+    - ".tsv"
+    - ".xml"
+    - ".lock"
+    - ".log"
+    # Images
+    - ".png"
+    - ".jpg"
+    - ".jpeg"
+    - ".gif"
+    - ".ico"
+    - ".svg"
+    - ".webp"
+    - ".bmp"
+    # Fonts
+    - ".woff"
+    - ".woff2"
+    - ".ttf"
+    - ".eot"
+    - ".otf"
+    # Media
+    - ".mp3"
+    - ".mp4"
+    - ".wav"
+    - ".avi"
+    - ".mov"
+    - ".webm"
+    # Archives
+    - ".zip"
+    - ".tar"
+    - ".gz"
+    - ".bz2"
+    - ".7z"
+    - ".rar"
+    # Documents
+    - ".pdf"
+    - ".doc"
+    - ".docx"
+    - ".xls"
+    - ".xlsx"
+    # Binaries
+    - ".exe"
+    - ".dll"
+    - ".so"
+    - ".dylib"
+    # Databases
+    - ".db"
+    - ".sqlite"
+    - ".sqlite3"
+    # Source maps
+    - ".map"
+  directories:
+    - ".git"
+    - "node_modules"
+    - "dist"
+    - "build"
+    - ".cache"
+    - "coverage"
+    - ".idea"
+    - ".vscode"
+    # Test directories
+    - "tests"
+    - "test"
+    - "__tests__"
+    - "fixtures"
+    - "fixture"
+  filenames:
+    - "LICENSE"
+    - "LICENSE.md"
+    - "LICENSE.txt"
+    - "Dockerfile"
+    - "docker-compose.yml"
+    - "docker-compose.yaml"
+    - ".gitignore"
+    - ".gitattributes"
+    - ".editorconfig"
+    - ".dockerignore"
+    - "Makefile"
+    - "Procfile"
+  patterns:
+    # Dotenv files
+    - '^\.env'
+    # Lock files (any name)
+    - '\.lock$'
+    # Test files (all stacks)
+    - '(^|/)test_[^/]+$'
+    - '_test\.[^/]+$'
+    - '\.(test|spec)\.[^/]+$'
+    - '(^|/)conftest\.py$'
+
+javascript:
+  extensions:
+    - ".json"
+    - ".css"
+    - ".scss"
+    - ".sass"
+    - ".less"
+    - ".styl"
+    - ".d.ts"
+    - ".d.mts"
+    - ".d.cts"
+  directories:
+    - "node_modules"
+    - ".next"
+    - ".nuxt"
+    - ".svelte-kit"
+    - ".turbo"
+    - ".vercel"
+    - ".netlify"
+    - ".parcel-cache"
+    - "storybook-static"
+    - ".storybook"
+  filenames:
+    - "package.json"
+    - "package-lock.json"
+    - "yarn.lock"
+    - "pnpm-lock.yaml"
+    - "bun.lockb"
+    - ".npmrc"
+    - ".yarnrc"
+    - ".nvmrc"
+    - ".browserslistrc"
+  patterns:
+    # Config files: vite.config.ts, webpack.config.js, etc.
+    - '\.config\.(ts|js|mjs|cjs)$'
+    # RC config files: .eslintrc.js, .prettierrc.json, etc.
+    - '\.rc\.(ts|js|json|ya?ml|cjs)$'
+    # Named configs
+    - '(^|/)tsconfig.*\.json$'
+    - '(^|/)jest\.config'
+    - '(^|/)vitest\.config'
+    - '(^|/)tailwind\.config'
+    - '(^|/)postcss\.config'
+    - '(^|/)next\.config'
+    - '(^|/)nuxt\.config'
+    - '(^|/)babel\.config'
+    - '(^|/)webpack\.config'
+    - '(^|/)rollup\.config'
+    - '(^|/)esbuild\.config'
+    - '(^|/)prettier\.config'
+    - '(^|/)eslint\.config'
+    - '(^|/)\.eslintrc'
+    - '(^|/)\.prettierrc'
+
+python:
+  extensions:
+    - ".pyc"
+    - ".pyo"
+    - ".pyd"
+    - ".cfg"
+    - ".ini"
+    - ".toml"
+    - ".pyi"        # Type stubs — declarations, not runtime code
+    - ".ipynb"      # Jupyter notebooks — not standard source
+    - ".whl"        # Wheel packages
+  directories:
+    - "__pycache__"
+    - ".venv"
+    - "venv"
+    - "env"
+    - ".eggs"
+    - ".mypy_cache"
+    - ".pytest_cache"
+    - ".ruff_cache"
+    - ".pytype"
+    - ".pyre"
+    - "htmlcov"
+    - ".tox"
+    - ".nox"
+    - "site-packages"
+    - ".ipynb_checkpoints"
+    # Django
+    - "staticfiles"
+    - "mediafiles"
+    # Alembic / Django
+    - "migrations"
+  filenames:
+    - "setup.py"
+    - "setup.cfg"
+    - "pyproject.toml"
+    - "MANIFEST.in"
+    - "tox.ini"
+    - "noxfile.py"
+    - ".flake8"
+    - ".pylintrc"
+    - ".coveragerc"
+    - ".pydocstyle"
+    - ".bandit"
+    - ".isort.cfg"
+    - "poetry.lock"
+    - "Pipfile"
+    - "Pipfile.lock"
+    - "requirements.txt"
+    - "requirements-dev.txt"
+    - "constraints.txt"
+    - "manage.py"       # Django management script — boilerplate
+    - "wsgi.py"         # WSGI entry — boilerplate
+    - "asgi.py"         # ASGI entry — boilerplate
+    - "celeryconfig.py" # Celery config — pure config
+    - "gunicorn.conf.py"
+    - "uwsgi.ini"
+  patterns:
+    - '\.egg-info/'
+    # Alembic version scripts
+    - 'alembic/versions/.*\.py$'
+    # Generated protobuf stubs
+    - '_pb2\.pyi?$'
+    - '_pb2_grpc\.py$'
+
+go:
+  extensions:
+    - ".sum"        # go.sum checksum — not code
+    - ".work"       # go.work workspace — config
+  directories:
+    - "vendor"
+    - "testdata"    # Go convention for test fixtures
+    - ".go"         # Go cache
+  filenames:
+    - "go.sum"
+    - "go.work.sum"
+    - "go.mod"      # Module definition — config, not code
+    - "go.work"     # Workspace definition
+    - ".golangci.yml"
+    - ".golangci.yaml"
+    - ".goreleaser.yml"
+    - ".goreleaser.yaml"
+    - "staticcheck.conf"
+    - "revive.toml"
+  patterns:
+    # Generated code markers (common Go convention)
+    - '_gen\.go$'
+    - '_generated\.go$'
+    # Mock files
+    - 'mock_.*\.go$'
+    - '.*_mock\.go$'
+    # Wire dependency injection output
+    - 'wire_gen\.go$'
+    # Protobuf generated
+    - '\.pb\.go$'
+    - '_grpc\.pb\.go$'
+    # Ent/SQLc generated
+    - '/ent/.*\.go$'
+    # Swagger/OpenAPI generated
+    - '_swagger\.go$'
+
+rust:
+  directories:
+    - "target"
+  filenames:
+    - "Cargo.lock"
+    - "rust-toolchain.toml"
+    - "clippy.toml"
+    - "rustfmt.toml"
+
+java:
+  extensions:
+    - ".properties"
+  directories:
+    - "target"
+    - ".gradle"
+    - ".mvn"
+  filenames:
+    - "gradlew"
+    - "gradlew.bat"
+    - "mvnw"
+    - "mvnw.cmd"
+    - "pom.xml"
+    - "build.gradle"
+    - "build.gradle.kts"
+    - "settings.gradle"
+    - "settings.gradle.kts"
+
+ruby:
+  directories:
+    - ".bundle"
+  filenames:
+    - "Gemfile"
+    - "Gemfile.lock"
+    - "Rakefile"
+    - ".ruby-version"
+    - ".rubocop.yml"
+
+csharp:
+  extensions:
+    - ".csproj"
+    - ".sln"
+    - ".props"
+    - ".targets"
+  directories:
+    - "bin"
+    - "obj"
+    - "packages"
+
+cpp:
+  filenames:
+    - "CMakeLists.txt"
+    - "Makefile"
+    - "configure"
+    - "configure.ac"
+    - "Makefile.am"
+  directories:
+    - "cmake-build-debug"
+    - "cmake-build-release"
+
+swift:
+  directories:
+    - ".build"
+    - "DerivedData"
+  filenames:
+    - "Package.resolved"

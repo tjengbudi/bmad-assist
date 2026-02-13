@@ -12,6 +12,7 @@ from __future__ import annotations
 
 from dataclasses import dataclass, field
 from enum import Enum
+from pathlib import Path
 from typing import TYPE_CHECKING, Any, Literal, NewType
 
 if TYPE_CHECKING:
@@ -650,6 +651,28 @@ def serialize_validation_result(result: DeepVerifyValidationResult) -> dict[str,
         if result.cost_summary
         else None,
     }
+
+
+@dataclass(frozen=True, slots=True)
+class FileAnalysisResult:
+    """Result of analyzing one file within a multi-turn batch session.
+
+    Attributes:
+        file_path: Path to the analyzed file.
+        findings: List of findings from analysis.
+        raw_response: Raw LLM response text.
+        success: Whether analysis completed without error.
+        error: Error message if analysis failed.
+        duration_ms: Execution time in milliseconds.
+
+    """
+
+    file_path: Path
+    findings: list[Finding]
+    raw_response: str
+    success: bool
+    error: str | None = None
+    duration_ms: int = 0
 
 
 def deserialize_validation_result(data: dict[str, Any]) -> DeepVerifyValidationResult:

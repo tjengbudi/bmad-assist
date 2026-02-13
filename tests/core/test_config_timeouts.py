@@ -10,6 +10,7 @@ from bmad_assist.core.config import (
     MasterProviderConfig,
     ProviderConfig,
     TimeoutsConfig,
+    get_phase_retries,
     get_phase_timeout,
 )
 
@@ -128,3 +129,86 @@ class TestGetPhaseTimeout:
         assert get_phase_timeout(config, "validate_story") == 1800
         assert get_phase_timeout(config, "dev_story") == 1800
         assert get_phase_timeout(config, "code_review") == 1800
+
+
+class TestTimeoutsConfigRetries:
+    """Tests for TimeoutsConfig.get_retries() method."""
+
+    def test_retries_default_is_none(self) -> None:
+        """retries defaults to None (no retry on timeout)."""
+        tc = TimeoutsConfig()
+        assert tc.retries is None
+
+    def test_retries_can_be_set(self) -> None:
+        """retries can be set to specific values."""
+        tc = TimeoutsConfig(retries=3)
+        assert tc.retries == 3
+
+    def test_retries_zero_means_infinite(self) -> None:
+        """retries=0 means infinite retry."""
+        tc = TimeoutsConfig(retries=0)
+        assert tc.retries == 0
+
+    def test_get_retries_returns_configured_value(self) -> None:
+        """get_retries returns the configured retries value."""
+        tc = TimeoutsConfig(retries=5)
+        assert tc.get_retries("any_phase") == 5
+        assert tc.get_retries("dev_story") == 5
+
+    def test_get_retries_returns_none_by_default(self) -> None:
+        """get_retries returns None when retries is not configured."""
+        tc = TimeoutsConfig()
+        assert tc.get_retries("dev_story") is None
+        assert tc.get_retries("validate_story") is None
+
+    def test_retries_minimum_validation(self) -> None:
+        """retries must be >= 0."""
+        with pytest.raises(ValueError):
+            TimeoutsConfig(retries=-1)
+
+
+class TestGetPhaseRetries:
+    """Tests for get_phase_retries helper function."""
+
+    def _make_config(
+        self,
+        timeout: int = 300,
+        timeouts: TimeoutsConfig | None = None,
+    ) -> Config:
+        """Create a minimal Config for testing."""
+        return Config(
+            providers=ProviderConfig(
+                master=MasterProviderConfig(provider="claude", model="opus")
+            ),
+            timeout=timeout,
+            timeouts=timeouts,
+        )
+
+    def test_returns_configured_retries(self) -> None:
+        """get_phase_retries returns configured retries value."""
+        tc = TimeoutsConfig(retries=3)
+        config = self._make_config(timeouts=tc)
+
+        assert get_phase_retries(config, "dev_story") == 3
+        assert get_phase_retries(config, "validate_story") == 3
+
+    def test_returns_none_when_not_configured(self) -> None:
+        """get_phase_retries returns None when retries is not set."""
+        tc = TimeoutsConfig()
+        config = self._make_config(timeouts=tc)
+
+        assert get_phase_retries(config, "dev_story") is None
+
+    def test_returns_none_for_legacy_config(self) -> None:
+        """get_phase_retries returns None for legacy config without timeouts."""
+        config = self._make_config(timeouts=None)
+
+        assert get_phase_retries(config, "dev_story") is None
+        assert get_phase_retries(config, "any_phase") is None
+
+    def test_zero_retries_means_infinite(self) -> None:
+        """get_phase_retries returns 0 for infinite retry."""
+        tc = TimeoutsConfig(retries=0)
+        config = self._make_config(timeouts=tc)
+
+        assert get_phase_retries(config, "dev_story") == 0

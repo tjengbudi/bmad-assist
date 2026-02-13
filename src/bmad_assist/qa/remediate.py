@@ -130,6 +130,8 @@ def collect_epic_issues(
     result = CollectionResult()
     collectors = [
         ("qa_results", _collect_from_qa_results),
+        ("deep_verify", _collect_from_deep_verify),
+        ("security", _collect_from_security),
         ("code_review", _collect_from_code_review_synthesis),
         ("retro", _collect_from_retro),
         ("scorecard", _collect_from_scorecard),
@@ -209,7 +211,150 @@ def _collect_from_qa_results(
 
 
 # ---------------------------------------------------------------------------
-# Source #2: Code review synthesis
+# Source #2: Deep Verify reports
+# ---------------------------------------------------------------------------
+
+# DV findings severity: CRITICAL → high, ERROR → high, WARNING → medium
+_DV_SEVERITY_MAP = {"critical": "high", "error": "high", "warning": "medium"}
+
+# DV findings table row: | F1 | CRITICAL | Title text... | domain | #method |
+_DV_FINDING_ROW = re.compile(
+    r"^\|\s*F\d+\s*\|\s*(\w+)\s*\|\s*(.+?)\s*\|\s*(.*?)\s*\|\s*(.*?)\s*\|",
+    re.MULTILINE,
+)
+
+# DV detailed finding header: #### F1: Title
+_DV_DETAIL_HEADER = re.compile(
+    r"^####\s+F\d+:\s+(.+)", re.MULTILINE
+)
+
+
+def _collect_from_deep_verify(
+    epic_id: EpicId,
+    project_path: Path,
+    max_age_days: int,
+    result: CollectionResult,
+) -> list[EpicIssue]:
+    """Extract findings from Deep Verify reports.
+
+    Parses the findings table (ID, Severity, Title, Domain, Method)
+    and optionally enriches with detailed evidence sections.
+    """
+    dv_dir = project_path / "_bmad-output" / "implementation-artifacts" / "deep-verify"
+    if not dv_dir.exists():
+        return []
+
+    pattern = f"deep-verify-{epic_id}-*-*.md"
+    files = sorted(dv_dir.glob(pattern))
+    if not files:
+        return []
+
+    issues: list[EpicIssue] = []
+    seen_titles: set[str] = set()
+
+    for f in files:
+        _check_freshness(f, "deep_verify", max_age_days, result)
+        content = f.read_text(encoding="utf-8")
+
+        # Build detail lookup: title → (analysis + evidence block)
+        detail_map: dict[str, str] = {}
+        detail_blocks = re.split(r"\n(?=####\s+F\d+:)", content)
+        for block in detail_blocks:
+            hdr = _DV_DETAIL_HEADER.match(block)
+            if hdr:
+                detail_map[hdr.group(1).strip().lower()] = block.strip()[:4000]
+
+        # Parse findings table rows
+        for m in _DV_FINDING_ROW.finditer(content):
+            raw_sev = m.group(1).strip().lower()
+            title = m.group(2).strip()
+            domain = m.group(3).strip()
+
+            # Deduplicate across DV reports (same title from different phases)
+            dedup_key = title.lower()
+            if dedup_key in seen_titles:
+                continue
+            seen_titles.add(dedup_key)
+
+            severity = _DV_SEVERITY_MAP.get(raw_sev, "medium")
+            context = detail_map.get(dedup_key, "")
+
+            desc = title[:200]
+            if domain and domain != "-":
+                desc = f"[{domain}] {desc}"
+
+            issues.append(
+                EpicIssue(
+                    source="deep_verify",
+                    severity=severity,
+                    description=desc,
+                    file_path=str(f),
+                    context=context,
+                )
+            )
+
+    return issues
+
+
+# ---------------------------------------------------------------------------
+# Source #3: Security reports
+# ---------------------------------------------------------------------------
+
+
+def _collect_from_security(
+    epic_id: EpicId,
+    project_path: Path,
+    max_age_days: int,
+    result: CollectionResult,
+) -> list[EpicIssue]:
+    """Extract findings from security review reports.
+
+    Parses YAML frontmatter for total_findings. If > 0, extracts
+    finding sections from markdown body.
+    """
+    sec_dir = project_path / "_bmad-output" / "implementation-artifacts" / "security-reports"
+    if not sec_dir.exists():
+        return []
+
+    pattern = f"security-{epic_id}-*.md"
+    files = sorted(sec_dir.glob(pattern))
+    if not files:
+        return []
+
+    issues: list[EpicIssue] = []
+    finding_header_re = re.compile(
+        r"^##\s+(?:CWE-\d+|Finding\s*\d*|Issue\s*\d*):\s*(.+)", re.MULTILINE
+    )
+
+    for f in files:
+        _check_freshness(f, "security", max_age_days, result)
+        content = f.read_text(encoding="utf-8")
+
+        # Quick check: skip if total_findings: 0 in frontmatter
+        fm_match = re.search(r"total_findings:\s*(\d+)", content)
+        if fm_match and int(fm_match.group(1)) == 0:
+            continue
+
+        # Extract finding sections
+        for block in re.split(r"\n(?=##\s)", content):
+            m = finding_header_re.match(block)
+            if m:
+                title = m.group(1).strip()
+                issues.append(
+                    EpicIssue(
+                        source="security",
+                        severity="high",
+                        description=f"Security: {title[:200]}",
+                        file_path=str(f),
+                        context=block.strip()[:4000],
+                    )
+                )
+
+    return issues
+
+
+# ---------------------------------------------------------------------------
+# Source #4: Code review synthesis
 # ---------------------------------------------------------------------------
 
 
@@ -256,7 +401,7 @@ def _collect_from_code_review_synthesis(
 
 
 # ---------------------------------------------------------------------------
-# Source #3: Retrospective
+# Source #5: Retrospective
 # ---------------------------------------------------------------------------
 
 
@@ -304,7 +449,7 @@ def _collect_from_retro(
 
 
 # ---------------------------------------------------------------------------
-# Source #4: Scorecard (optional)
+# Source #6: Scorecard (optional)
 # ---------------------------------------------------------------------------
 
 
@@ -367,8 +512,14 @@ def _collect_from_scorecard(
 
 
 # ---------------------------------------------------------------------------
-# Source #5: Story validations
+# Source #7: Story validations (prefer synthesis over individuals)
 # ---------------------------------------------------------------------------
+
+# Validation finding patterns — only match structured findings, not random text
+_VALIDATION_BULLET_RE = re.compile(
+    r"^\s*-\s+\*\*(.+?)\*\*[:\s](.+)",
+    re.MULTILINE,
+)
 
 
 def _collect_from_validation(
@@ -377,22 +528,112 @@ def _collect_from_validation(
     max_age_days: int,
     result: CollectionResult,
 ) -> list[EpicIssue]:
-    """Scan validation reports for unmet AC / requirements."""
+    """Scan validation reports for unmet AC / requirements.
+
+    Prefers synthesis reports (curated, deduplicated) over individual
+    validator outputs. Falls back to individual files only when no
+    synthesis exists.
+    """
     val_dir = project_path / "_bmad-output" / "implementation-artifacts" / "story-validations"
     if not val_dir.exists():
         return []
 
-    # Use broad glob then post-filter to ensure epic_id is a complete segment
-    # (avoids matching epic 11 when looking for epic 1)
-    pattern = f"*{epic_id}-*.md"
     epic_id_str = str(epic_id)
+    epic_filter = re.compile(rf"(?:^|[-_]){re.escape(epic_id_str)}(?:[-_])")
+
+    # Prefer synthesis reports
+    synthesis_pattern = f"synthesis-{epic_id}-*.md"
+    synthesis_files = [
+        f for f in sorted(val_dir.glob(synthesis_pattern))
+        if epic_filter.search(f.name)
+    ]
+
+    if synthesis_files:
+        return _collect_validation_from_synthesis(
+            synthesis_files, max_age_days, result,
+        )
+
+    # Fallback: individual validation reports
+    pattern = f"*{epic_id}-*.md"
     files = [
         f for f in sorted(val_dir.glob(pattern))
-        if re.search(rf"(?:^|[-_]){re.escape(epic_id_str)}(?:[-_])", f.name)
+        if epic_filter.search(f.name) and not f.name.startswith("synthesis-")
     ]
     if not files:
         return []
 
+    return _collect_validation_from_individuals(files, max_age_days, result)
+
+
+def _collect_validation_from_synthesis(
+    files: list[Path],
+    max_age_days: int,
+    result: CollectionResult,
+) -> list[EpicIssue]:
+    """Extract structured findings from validation synthesis reports.
+
+    Synthesis reports have nested structure:
+      ## Issues Verified (by severity)
+        ### Critical
+          - **Title**: Description
+        ### High
+          - **Title**: Description
+    """
+    issues: list[EpicIssue] = []
+
+    for f in files:
+        _check_freshness(f, "validation", max_age_days, result)
+        content = f.read_text(encoding="utf-8")
+
+        # Find the "Issues Verified" section
+        verified_match = re.search(
+            r"^##\s+Issues?\s+Verified.*$",
+            content, re.MULTILINE | re.IGNORECASE,
+        )
+        if not verified_match:
+            continue
+
+        # Get content from "Issues Verified" to next ## section
+        rest = content[verified_match.end():]
+        next_h2 = re.search(r"^##\s+(?!#)", rest, re.MULTILINE)
+        verified_section = rest[:next_h2.start()] if next_h2 else rest
+
+        # Split by ### sub-headings (severity levels)
+        sub_sections = re.split(r"\n(?=###\s)", verified_section)
+        for sub in sub_sections:
+            sub_header = sub.split("\n", 1)[0].strip()
+
+            # Determine severity from sub-header
+            if re.search(r"Critical|High", sub_header, re.IGNORECASE):
+                sev = "high"
+            elif re.search(r"Medium", sub_header, re.IGNORECASE):
+                sev = "medium"
+            else:
+                sev = "low"
+
+            # Extract structured bullet findings: - **Title**: description
+            for m in _VALIDATION_BULLET_RE.finditer(sub):
+                title = m.group(1).strip()
+                desc = m.group(2).strip()
+                issues.append(
+                    EpicIssue(
+                        source="validation",
+                        severity=sev,
+                        description=f"{title}: {desc}"[:200],
+                        file_path=str(f),
+                        context=m.group(0).strip()[:4000],
+                    )
+                )
+
+    return issues
+
+
+def _collect_validation_from_individuals(
+    files: list[Path],
+    max_age_days: int,
+    result: CollectionResult,
+) -> list[EpicIssue]:
+    """Fallback: extract findings from individual validation reports."""
     issues: list[EpicIssue] = []
     fail_re = re.compile(r"\b(FAIL|NOT\s+MET|MISSING|REJECTED)\b", re.IGNORECASE)
 
@@ -401,13 +642,17 @@ def _collect_from_validation(
         content = f.read_text(encoding="utf-8")
         for line in content.split("\n"):
             if fail_re.search(line):
+                stripped = line.strip()
+                # Skip table header/separator lines and short noise
+                if stripped.startswith("|--") or len(stripped) < 20:
+                    continue
                 issues.append(
                     EpicIssue(
                         source="validation",
                         severity="high",
-                        description=line.strip()[:200],
+                        description=stripped[:200],
                         file_path=str(f),
-                        context=line.strip(),
+                        context=stripped,
                     )
                 )
 
@@ -415,7 +660,7 @@ def _collect_from_validation(
 
 
 # ---------------------------------------------------------------------------
-# Source #6: Individual code reviews (only if no synthesis)
+# Source #8: Individual code reviews (only if no synthesis)
 # ---------------------------------------------------------------------------
 
 
@@ -749,3 +994,27 @@ def compare_failure_sets(
     new = post - pre
     remaining = pre & post
     return fixed, new, remaining
+
+
+def _apply_issue_limit(
+    issues: list[EpicIssue],
+    max_issues: int,
+) -> list[EpicIssue]:
+    """Truncate issues to max_issues, preserving high-severity first.
+
+    Args:
+        issues: List of issues to truncate.
+        max_issues: Maximum number of issues to return.
+
+    Returns:
+        Truncated list, sorted by severity (high → medium → low).
+
+    """
+    if len(issues) <= max_issues:
+        return issues
+
+    severity_order = {"high": 0, "medium": 1, "low": 2}
+    return sorted(
+        issues,
+        key=lambda i: severity_order.get(i.severity, 99)
+    )[:max_issues]

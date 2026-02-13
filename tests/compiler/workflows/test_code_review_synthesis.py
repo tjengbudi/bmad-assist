@@ -516,8 +516,10 @@ class TestSynthesisContext:
         assert root is not None
 
         # The escaped sequence should be in the output
-        # ]]> becomes ]]]]><![CDATA[>
-        assert "]]]]><![CDATA[>" in result.context or "data[index]" in result.context
+        # ]]> becomes \n]]]]><![CDATA[\n (with newlines)
+        assert ("\n]]]]><![CDATA[\n" in result.context or
+                "]]]]><![CDATA[>" in result.context or
+                "data[index]" in result.context)
 
 
 class TestSynthesisValidation:

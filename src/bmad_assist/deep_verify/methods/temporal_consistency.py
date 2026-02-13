@@ -818,3 +818,104 @@ class TemporalConsistencyMethod(BaseVerificationMethod):
             return detected_domains[0]
 
         return None
+
+    # =========================================================================
+    # Batch Interface
+    # =========================================================================
+
+    @property
+    def supports_batch(self) -> bool:
+        """Whether this method supports batch mode."""
+        return True
+
+    def get_method_prompt(self, **kwargs: object) -> str:
+        """Return method's analysis instructions WITHOUT file content.
+
+        Sent as Turn 1 of multi-turn batch session. Includes the system prompt,
+        category descriptions with examples, and JSON format instructions.
+
+        Args:
+            **kwargs: Additional context (unused for this method).
+
+        Returns:
+            Method instruction prompt string.
+
+        """
+        # Build category descriptions (same logic as _build_prompt)
+        category_descriptions = []
+        for cat in self._categories:
+            definition = TEMPORAL_CATEGORIES[cat]
+            category_descriptions.append(f"- {cat.value.upper()}: {definition.description}")
+            # Add examples for clarity (limit to 2 per category)
+            for example in definition.examples[:2]:
+                category_descriptions.append(f"    Example: {example}")
+
+        categories_str = "\n".join(category_descriptions)
+
+        return (
+            f"{TEMPORAL_CONSISTENCY_SYSTEM_PROMPT}\n\n"
+            f"Categories to analyze:\n"
+            f"{categories_str}\n\n"
+            f"Identify all temporal consistency issues in the artifact. "
+            f"For each issue, provide:\n"
+            f"- issue: Description of the temporal issue\n"
+            f"- category: One of [timeout, ordering, clock, expiration, race_window]\n"
+            f"- impact: One of [high, medium, low]\n"
+            f"- evidence_quote: Code snippet showing where issue exists\n"
+            f"- line_number: Integer line number or null if not identifiable (NEVER use task IDs, labels, or non-numeric values)\n"
+            f"- consequences: What happens if issue manifests\n"
+            f"- recommendation: How to fix or mitigate the issue\n\n"
+            f"Respond with JSON in this format:\n"
+            f"{{\n"
+            f'    "temporal_issues": [\n'
+            f"        {{\n"
+            f'            "issue": "Description...",\n'
+            f'            "category": "timeout",\n'
+            f'            "impact": "high",\n'
+            f'            "evidence_quote": "code snippet",\n'
+            f'            "line_number": 42,\n'
+            f'            "consequences": "If this happens...",\n'
+            f'            "recommendation": "Use monotonic clock instead..."\n'
+            f"        }}\n"
+            f"    ]\n"
+            f"}}\n\n"
+            f"I will send files one at a time. For each file, analyze and return the JSON."
+        )
+
+    def parse_file_response(self, raw_response: str, file_path: str) -> list[Finding]:
+        """Parse LLM response for a single file in batch mode.
+
+        Reuses _parse_response() for JSON extraction and
+        _create_finding_from_issue() for finding creation.
+
+        Args:
+            raw_response: Raw LLM response text for one file.
+            file_path: Path to the file that was analyzed.
+
+        Returns:
+            List of Finding objects extracted from the response.
+
+        """
+        try:
+            result = self._parse_response(raw_response)
+
+            findings: list[Finding] = []
+            finding_idx = 0
+
+            for issue_data in result.temporal_issues:
+                confidence = impact_to_confidence(ImpactLevel(issue_data.impact))
+                if confidence >= self._threshold:
+                    finding_idx += 1
+                    findings.append(
+                        self._create_finding_from_issue(
+                            issue_data, finding_idx, []
+                        )
+                    )
+
+            return findings
+
+        except (json.JSONDecodeError, ValueError, KeyError) as e:
+            logger.debug(
+                "Failed to parse batch file response for %s: %s", file_path, e
+            )
+            return []

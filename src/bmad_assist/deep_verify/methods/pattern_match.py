@@ -148,7 +148,6 @@ class PatternMatchMethod(BaseVerificationMethod):
                 logger.debug("Using all %d patterns", len(patterns))
 
             if not patterns:
-                logger.warning("No patterns available for matching")
                 return []
 
             # Create matcher and run pattern matching
@@ -250,3 +249,12 @@ class PatternMatchMethod(BaseVerificationMethod):
             )
 
         return evidence
+
+    # =========================================================================
+    # Batch Interface
+    # =========================================================================
+
+    @property
+    def supports_batch(self) -> bool:
+        """Whether this method supports batch mode."""
+        return True

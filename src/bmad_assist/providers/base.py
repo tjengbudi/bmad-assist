@@ -377,7 +377,11 @@ def write_progress(line: str) -> None:
             hook(line, provider)
 
 
-def extract_tool_details(tool_name: str, tool_input: dict[str, Any]) -> str:
+def extract_tool_details(
+    tool_name: str,
+    tool_input: dict[str, Any],
+    cwd: Path | None = None,
+) -> str:
     """Extract human-readable details from tool input.
 
     Shared utility for formatting tool usage display across providers.
@@ -386,6 +390,8 @@ def extract_tool_details(tool_name: str, tool_input: dict[str, Any]) -> str:
     Args:
         tool_name: Name of the tool (e.g., "Read", "Bash", "run_shell_command").
         tool_input: The input dict passed to the tool.
+        cwd: Working directory to make file paths relative to. If provided,
+            file paths will be shown relative to this directory.
 
     Returns:
         Brief description of what the tool is doing, or empty string for unknown tools.
@@ -411,9 +417,27 @@ def extract_tool_details(tool_name: str, tool_input: dict[str, Any]) -> str:
         file_path: str = str(
             tool_input.get("file_path") or tool_input.get("path") or tool_input.get("file_id", "?")
         )
-        # Make path relative if possible (strip common prefixes)
-        if "/" in file_path:
-            # Show last 3 path components for context
+        # Make path relative to cwd if possible
+        if cwd is not None and file_path != "?" and "/" in file_path:
+            try:
+                abs_path = Path(file_path)
+                if not abs_path.is_absolute():
+                    abs_path = cwd / file_path
+                try:
+                    rel_path = abs_path.relative_to(cwd)
+                    file_path = str(rel_path)
+                except ValueError:
+                    # File is not under cwd, show last 3 components
+                    parts = file_path.split("/")
+                    if len(parts) > 3:
+                        file_path = ".../" + "/".join(parts[-3:])
+            except Exception:
+                # Fallback to original path handling on any error
+                parts = file_path.split("/")
+                if len(parts) > 3:
+                    file_path = ".../" + "/".join(parts[-3:])
+        elif "/" in file_path and file_path != "?":
+            # No cwd provided, use fallback logic
             parts = file_path.split("/")
             if len(parts) > 3:
                 file_path = ".../" + "/".join(parts[-3:])

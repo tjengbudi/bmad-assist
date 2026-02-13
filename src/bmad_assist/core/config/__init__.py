@@ -37,6 +37,7 @@ from bmad_assist.core.config.loaders import (
     _load_yaml_file,
     _reset_config,
     get_config,
+    get_phase_retries,
     get_phase_timeout,
     load_config,
     load_config_with_project,
@@ -168,6 +169,7 @@ __all__ = [
     "load_config_with_project",
     "reload_config",
     "get_phase_timeout",
+    "get_phase_retries",
     "_reset_config",
     # Loop Config
     "get_loop_config",

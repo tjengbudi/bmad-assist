@@ -662,3 +662,91 @@ class BoundaryAnalysisMethod(BaseVerificationMethod):
             domain=domain,
             evidence=evidence,
         )
+
+    # =========================================================================
+    # Batch Interface
+    # =========================================================================
+
+    @property
+    def supports_batch(self) -> bool:
+        """Whether this method supports batch mode."""
+        return True
+
+    def get_method_prompt(self, **kwargs: object) -> str:
+        """Return method's analysis instructions WITHOUT file content.
+
+        Sent as Turn 1 of multi-turn batch session. Includes the system prompt
+        and all checklist items so the LLM knows what to evaluate.
+
+        Args:
+            **kwargs: Additional context, may include 'domains' as
+                      list[ArtifactDomain] to select domain-specific checklists.
+
+        Returns:
+            Method instruction prompt string with checklist items.
+
+        """
+        # Extract domains from kwargs for checklist selection
+        domains: list[ArtifactDomain] | None = kwargs.get("domains")  # type: ignore[assignment]
+
+        # Load appropriate checklists (same logic as analyze())
+        checklist_items = self._loader.load(domains)
+
+        # Build checklist section (same format as _build_batch_prompt)
+        checklist_section = []
+        for i, item in enumerate(checklist_items, 1):
+            checklist_section.append(
+                f"{i}. ID: {item.id}\n"
+                f"   Category: {item.category}\n"
+                f"   Question: {item.question}\n"
+                f"   Description: {item.description}"
+            )
+
+        return (
+            f"{BOUNDARY_ANALYSIS_SYSTEM_PROMPT}\n\n"
+            f"Checklist items to evaluate ({len(checklist_items)} items):\n\n"
+            + "\n\n".join(checklist_section)
+            + "\n\nI will send files one at a time. For each file, analyze all "
+            "checklist items and return the JSON array."
+        )
+
+    def parse_file_response(self, raw_response: str, file_path: str) -> list[Finding]:
+        """Parse LLM response for a single file in batch mode.
+
+        Reuses _parse_batch_response() for JSON extraction and _create_finding()
+        for finding creation.
+
+        Args:
+            raw_response: Raw LLM response text for one file.
+            file_path: Path to the file that was analyzed.
+
+        Returns:
+            List of Finding objects extracted from the response.
+
+        """
+        try:
+            responses = self._parse_batch_response(raw_response)
+
+            # Load checklist items to build lookup (use general only since
+            # we don't have domain context per-file in batch mode)
+            all_items = self._loader.load()
+            items_by_id = {item.id: item for item in all_items}
+
+            findings: list[Finding] = []
+            finding_idx = 0
+            for resp in responses:
+                if resp.violated and resp.confidence >= self._threshold:
+                    item = items_by_id.get(resp.id)
+                    if item is None:
+                        logger.debug("LLM returned unknown checklist ID: %s", resp.id)
+                        continue
+                    finding_idx += 1
+                    findings.append(self._create_finding(resp, item, finding_idx))
+
+            return findings
+
+        except (json.JSONDecodeError, ValueError, KeyError) as e:
+            logger.debug(
+                "Failed to parse batch file response for %s: %s", file_path, e
+            )
+            return []

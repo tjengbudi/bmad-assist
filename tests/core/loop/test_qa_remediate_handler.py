@@ -9,8 +9,7 @@ import pytest
 import yaml
 
 from bmad_assist.core.loop.handlers.qa_remediate import QaRemediateHandler
-from bmad_assist.core.loop.types import PhaseResult
-from bmad_assist.core.state import Phase, State
+from bmad_assist.core.state import State
 from bmad_assist.qa.remediate import REMEDIATE_ESCALATIONS_END, REMEDIATE_ESCALATIONS_START
 
 
@@ -21,6 +20,7 @@ def mock_config() -> MagicMock:
     config.qa.remediate_max_iterations = 2
     config.qa.remediate_max_age_days = 7
     config.qa.remediate_safety_cap = 0.8
+    config.qa.remediate_max_issues = 200
     config.qa.qa_artifacts_path = "{project-root}/_bmad-output/qa-artifacts"
     config.providers.master.provider = "claude-subprocess"
     config.providers.master.model = "opus"

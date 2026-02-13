@@ -12,6 +12,7 @@ import asyncio
 import difflib
 import json
 import logging
+import random
 from dataclasses import dataclass, replace
 from pathlib import Path
 from typing import TYPE_CHECKING, Any
@@ -64,6 +65,8 @@ class VerificationContext:
     Attributes:
         file_path: Path to source file (if applicable).
         language: Programming language identifier (if known).
+        project_stacks: Project-level tech stacks (e.g. ["javascript", "python"]).
+            Used as fallback when per-file language detection fails.
         story_ref: Story reference string (if applicable).
         epic_num: Epic number (int or str) for context.
         story_num: Story number (int or str) for context.
@@ -72,6 +75,7 @@ class VerificationContext:
 
     file_path: Path | None = None
     language: str | None = None
+    project_stacks: tuple[str, ...] = ()
     story_ref: str | None = None
     epic_num: int | str | None = None
     story_num: int | str | None = None
@@ -358,6 +362,15 @@ class DeepVerifyEngine:
                     lang_info.language,
                     lang_info.confidence,
                 )
+            elif context.project_stacks:
+                # Fallback: use first project stack as language hint
+                fallback_lang = context.project_stacks[0]
+                context = replace(context, language=fallback_lang)
+                logger.debug(
+                    "Using project stack as language fallback: %s (for %s)",
+                    fallback_lang,
+                    context.file_path.name if context.file_path else "unknown",
+                )
 
         # 2. Domain detection (with keyword fallback)
         logger.info("Deep Verify: detecting domains...")
@@ -435,6 +448,43 @@ class DeepVerifyEngine:
         return verdict
 
     # ========================================================================
+    # Batch Verification
+    # ========================================================================
+
+    async def verify_batch(
+        self,
+        files: list[tuple[Path, str]],
+        context: VerificationContext | None = None,
+        base_timeout: int | None = None,
+        file_hunk_ranges: dict[Path, list[tuple[int, int]]] | None = None,
+    ) -> dict[Path, Verdict]:
+        """Batch verify multiple files via multi-turn sessions.
+
+        Delegates to BatchVerifyOrchestrator which runs one session per method
+        across all files, reducing N×M LLM calls to M sessions.
+
+        Args:
+            files: List of (file_path, content) tuples.
+            context: Optional verification context.
+            base_timeout: Base timeout per file in seconds.
+            file_hunk_ranges: Optional per-file hunk ranges from git diff.
+
+        Returns:
+            Dict mapping file_path → Verdict.
+
+        """
+        from bmad_assist.deep_verify.core.batch import BatchVerifyOrchestrator
+
+        orchestrator = BatchVerifyOrchestrator(
+            self._config,
+            self._project_root,
+            helper_provider_config=self._helper_provider_config,
+        )
+        return await orchestrator.verify_batch(
+            files, context, base_timeout, file_hunk_ranges=file_hunk_ranges
+        )
+
+    # ========================================================================
     # Domain Detection with Fallback
     # ========================================================================
 
@@ -468,7 +518,7 @@ class DeepVerifyEngine:
             )
         except (ProviderError, ProviderTimeoutError, ValueError, json.JSONDecodeError) as e:
             # Handles known exceptions from domain detection including JSON parse errors
-            logger.warning("Domain detection failed, using keyword fallback: %s", e)
+            logger.debug("Domain detection LLM unusable, using keyword fallback: %s", e)
             return self._keyword_domain_detection(artifact_text)
 
     def _keyword_domain_detection(self, artifact_text: str) -> DomainDetectionResult:
@@ -590,11 +640,11 @@ class DeepVerifyEngine:
         timeout: int | None,
         domains: list[ArtifactDomain] | None = None,
     ) -> list[MethodResult]:
-        """Run all methods in parallel with timeout and error handling.
+        """Run methods with staggered spawning, timeout, and error handling.
 
-        Uses asyncio.gather with return_exceptions=True to handle failures
-        gracefully without blocking other methods. Returns MethodResult
-        objects with findings and error information for partial results mode.
+        Spawns each method as an async task with a configurable stagger delay
+        (default 1s ± 20% jitter) between launches to avoid rate limiting.
+        All tasks then run concurrently and are awaited together.
 
         Args:
             methods: List of methods to execute.
@@ -607,10 +657,29 @@ class DeepVerifyEngine:
             List of MethodResult with findings and error information.
 
         """
-        tasks = [
-            self._run_single_method_with_result(m, artifact_text, context, timeout, domains)
-            for m in methods
-        ]
+        # Stagger delay from config (default 1.0s, ±20% jitter)
+        stagger = self._config.llm_config.method_stagger_seconds if self._config else 0.5
+        jitter_factor = 0.2
+
+        # Spawn tasks with stagger delay between each
+        tasks: list[asyncio.Task[MethodResult]] = []
+        for idx, method in enumerate(methods):
+            if idx > 0 and stagger > 0:
+                jitter = random.uniform(1 - jitter_factor, 1 + jitter_factor)
+                delay = stagger * jitter
+                logger.debug(
+                    "Stagger delay %.2fs before spawning method %s",
+                    delay,
+                    method.method_id,
+                )
+                await asyncio.sleep(delay)
+            task = asyncio.create_task(
+                self._run_single_method_with_result(
+                    method, artifact_text, context, timeout, domains,
+                ),
+                name=f"dv-{method.method_id}",
+            )
+            tasks.append(task)
 
         results = await asyncio.gather(*tasks, return_exceptions=True)
 

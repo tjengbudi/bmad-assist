@@ -11,6 +11,7 @@ from bmad_assist.deep_verify.integration.code_review_hook import (
     _resolve_code_files,
     load_dv_findings_from_cache,
     run_deep_verify_code_review,
+    run_deep_verify_code_review_batch,
     save_dv_findings_for_synthesis,
 )
 from bmad_assist.deep_verify.integration.validate_story_hook import (
@@ -20,6 +21,7 @@ from bmad_assist.deep_verify.integration.validate_story_hook import (
 __all__ = [
     "run_deep_verify_validation",
     "run_deep_verify_code_review",
+    "run_deep_verify_code_review_batch",
     "save_dv_findings_for_synthesis",
     "load_dv_findings_from_cache",
     "_resolve_code_files",

@@ -595,12 +595,13 @@ class AssumptionSurfacingMethod(BaseVerificationMethod):
         - JSON inside markdown code blocks (```json...```)
         - Raw JSON objects
         - Nested braces by tracking depth
+        - Partial/incomplete assumptions (filters them out with warnings)
 
         Args:
             raw_response: Raw text response from LLM.
 
         Returns:
-            Parsed AssumptionAnalysisResponse.
+            Parsed AssumptionAnalysisResponse with only complete assumptions.
 
         Raises:
             ValueError: If response cannot be parsed.
@@ -634,8 +635,40 @@ class AssumptionSurfacingMethod(BaseVerificationMethod):
                 else:
                     raise ValueError("No JSON found in response")
 
-        # Parse with Pydantic validation
+        # Parse JSON and filter incomplete assumptions BEFORE Pydantic validation
         data = json.loads(json_str)
+
+        # Filter out incomplete assumptions before Pydantic validation
+        required_fields = {"assumption", "category", "violation_risk", "evidence_quote"}
+        raw_assumptions = data.get("assumptions", [])
+        complete_assumptions = []
+
+        for idx, assumption in enumerate(raw_assumptions):
+            missing = [
+                f for f in required_fields
+                if f not in assumption or not assumption[f] or str(assumption[f]).strip() == ""
+            ]
+            if missing:
+                logger.warning(
+                    "Assumption #%d missing required fields %s - discarding incomplete data",
+                    idx,
+                    missing,
+                )
+            else:
+                complete_assumptions.append(assumption)
+
+        if len(raw_assumptions) > 0 and len(complete_assumptions) == 0:
+            logger.warning("All assumptions were incomplete - returning empty response")
+        elif len(complete_assumptions) < len(raw_assumptions):
+            logger.info(
+                "Filtered %d incomplete assumptions, %d complete assumptions remaining",
+                len(raw_assumptions) - len(complete_assumptions),
+                len(complete_assumptions),
+            )
+
+        # Update data with only complete assumptions
+        data["assumptions"] = complete_assumptions
+
         return AssumptionAnalysisResponse(**data)
 
     def _create_finding_from_assumption(
@@ -834,3 +867,101 @@ class AssumptionSurfacingMethod(BaseVerificationMethod):
             return ArtifactDomain.API
 
         return None
+
+    # =========================================================================
+    # Batch Interface
+    # =========================================================================
+
+    @property
+    def supports_batch(self) -> bool:
+        """Whether this method supports batch mode."""
+        return True
+
+    def get_method_prompt(self, **kwargs: object) -> str:
+        """Return method's analysis instructions WITHOUT file content.
+
+        Sent as Turn 1 of multi-turn batch session. Includes the system prompt,
+        category descriptions, and JSON format instructions.
+
+        Args:
+            **kwargs: Additional context (unused for this method).
+
+        Returns:
+            Method instruction prompt string.
+
+        """
+        # Build category descriptions (same logic as _build_prompt)
+        category_descriptions = []
+        for cat in self._categories:
+            definition = ASSUMPTION_CATEGORIES[cat]
+            category_descriptions.append(f"- {cat.value.upper()}: {definition.description}")
+
+        categories_str = "\n".join(category_descriptions)
+
+        return (
+            f"{ASSUMPTION_SURFACING_SYSTEM_PROMPT}\n\n"
+            f"Categories to analyze:\n"
+            f"{categories_str}\n\n"
+            f"Identify all implicit assumptions in the artifact. "
+            f"For each assumption, provide:\n"
+            f"- assumption: Description of the implicit assumption\n"
+            f"- category: One of [environmental, ordering, data, timing, contract]\n"
+            f"- violation_risk: One of [high, medium, low]\n"
+            f"- evidence_quote: Code snippet showing where assumption is made\n"
+            f"- line_number: Integer line number or null if not identifiable (NEVER use task IDs, labels, or non-numeric values)\n"
+            f"- consequences: What happens if assumption is violated\n"
+            f"- recommendation: How to handle or document the assumption\n\n"
+            f"Respond with JSON in this format:\n"
+            f"{{\n"
+            f'    "assumptions": [\n'
+            f"        {{\n"
+            f'            "assumption": "Assumes X...",\n'
+            f'            "category": "data",\n'
+            f'            "violation_risk": "high",\n'
+            f'            "evidence_quote": "code snippet",\n'
+            f'            "line_number": 42,\n'
+            f'            "consequences": "If violated, Y will happen...",\n'
+            f'            "recommendation": "Add explicit check for..."\n'
+            f"        }}\n"
+            f"    ]\n"
+            f"}}\n\n"
+            f"I will send files one at a time. For each file, analyze and return the JSON."
+        )
+
+    def parse_file_response(self, raw_response: str, file_path: str) -> list[Finding]:
+        """Parse LLM response for a single file in batch mode.
+
+        Reuses _parse_response() for JSON extraction and
+        _create_finding_from_assumption() for finding creation.
+
+        Args:
+            raw_response: Raw LLM response text for one file.
+            file_path: Path to the file that was analyzed.
+
+        Returns:
+            List of Finding objects extracted from the response.
+
+        """
+        try:
+            result = self._parse_response(raw_response)
+
+            findings: list[Finding] = []
+            finding_idx = 0
+
+            for assumption_data in result.assumptions:
+                confidence = risk_to_confidence(RiskLevel(assumption_data.violation_risk))
+                if confidence >= self._threshold:
+                    finding_idx += 1
+                    findings.append(
+                        self._create_finding_from_assumption(
+                            assumption_data, finding_idx, []
+                        )
+                    )
+
+            return findings
+
+        except (json.JSONDecodeError, ValueError, KeyError) as e:
+            logger.debug(
+                "Failed to parse batch file response for %s: %s", file_path, e
+            )
+            return []

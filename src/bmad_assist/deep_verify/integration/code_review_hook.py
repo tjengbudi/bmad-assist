@@ -74,6 +74,7 @@ async def run_deep_verify_code_review(
     story_num: int | str,
     story_ref: str | None = None,
     timeout: int | None = None,
+    project_stacks: tuple[str, ...] | None = None,
 ) -> DeepVerifyValidationResult:
     """Run Deep Verify code review on a source file.
 
@@ -153,29 +154,11 @@ async def run_deep_verify_code_review(
         # Track duration
         start_time = time.perf_counter()
 
-        # Detect language from file path and content
-        detector = LanguageDetector()
-        lang_info = detector.detect(file_path, code_content)
-
-        if lang_info.is_unknown:
-            logger.warning(
-                "Could not detect language for %s, using spec patterns only",
-                file_path,
-            )
-            detected_language = None
-        else:
-            detected_language = lang_info.language
-            logger.debug(
-                "Detected language: %s (confidence: %.2f, method: %s)",
-                lang_info.language,
-                lang_info.confidence,
-                lang_info.detection_method,
-            )
-
-        # Create verification context with language info
+        # Create verification context (language auto-detected by engine,
+        # with project_stacks fallback for unknown extensions like .html/.svelte)
         context = VerificationContext(
             file_path=file_path,
-            language=detected_language,
+            project_stacks=project_stacks or (),
             story_ref=story_ref or f"{epic_num}.{story_num}",
             epic_num=epic_num,
             story_num=story_num,
@@ -257,6 +240,99 @@ async def run_deep_verify_code_review(
         )
 
 
+async def run_deep_verify_code_review_batch(
+    files: list[tuple[Path, str]],
+    config: Config,
+    project_path: Path,
+    epic_num: EpicId,
+    story_num: int | str,
+    story_ref: str | None = None,
+    base_timeout: int | None = None,
+    project_stacks: tuple[str, ...] | None = None,
+    file_hunk_ranges: dict[Path, list[tuple[int, int]]] | None = None,
+) -> dict[Path, DeepVerifyValidationResult]:
+    """Batch DV scan — one multi-turn session per method.
+
+    Instead of N×M LLM calls (N files × M methods), uses M sessions
+    each processing files sequentially.
+
+    Args:
+        files: List of (file_path, content) tuples to analyze.
+        config: Application configuration with deep_verify settings.
+        project_path: Path to project root.
+        epic_num: Epic number being reviewed.
+        story_num: Story number being reviewed.
+        story_ref: Optional story reference string.
+        base_timeout: Base timeout per file in seconds.
+        project_stacks: Project-level tech stacks.
+
+    Returns:
+        Dict mapping file_path → DeepVerifyValidationResult.
+        Returns empty dict if DV is disabled.
+
+    """
+    # Check if DV is enabled in config
+    dv_config = getattr(config, "deep_verify", None)
+    if dv_config is None or not dv_config.enabled:
+        logger.debug("Deep Verify disabled, skipping batch scan")
+        return {}
+
+    try:
+        logger.info(
+            "Starting batch Deep Verify for %d files (story %s.%s)",
+            len(files),
+            epic_num,
+            story_num,
+        )
+        start_time = time.perf_counter()
+
+        helper_provider_config = getattr(config.providers, "helper", None)
+
+        engine = DeepVerifyEngine(
+            project_root=project_path,
+            config=dv_config,
+            helper_provider_config=helper_provider_config,
+        )
+
+        verdicts = await engine.verify_batch(
+            files, base_timeout=base_timeout,
+            file_hunk_ranges=file_hunk_ranges,
+        )
+
+        duration_ms = int((time.perf_counter() - start_time) * 1000)
+
+        # Convert verdicts to DeepVerifyValidationResult
+        results: dict[Path, DeepVerifyValidationResult] = {}
+        for fp, verdict in verdicts.items():
+            results[fp] = DeepVerifyValidationResult(
+                findings=verdict.findings,
+                domains_detected=verdict.domains_detected,
+                methods_executed=verdict.methods_executed,
+                verdict=verdict.decision,
+                score=verdict.score,
+                duration_ms=duration_ms,
+                error=None,
+            )
+
+        logger.info(
+            "Batch Deep Verify complete: %d files in %dms",
+            len(files),
+            duration_ms,
+        )
+        return results
+
+    except (ProviderError, ProviderTimeoutError, BmadAssistError) as e:
+        logger.warning("Batch Deep Verify failed (non-blocking): %s", type(e).__name__)
+        return {}
+    except (RuntimeError, OSError, ValueError, TypeError, AttributeError) as e:
+        logger.warning(
+            "Batch Deep Verify unexpected error (non-blocking): %s",
+            type(e).__name__,
+            exc_info=True,
+        )
+        return {}
+
+
 def _resolve_code_files(
     project_path: Path,
     epic_num: EpicId,
@@ -294,32 +370,21 @@ def _resolve_code_files(
         logger.warning("Failed to read story file %s: %s", story_file, e)
         return []
 
-    # Extract File List section (stop at any ## or ### header)
-    file_list_match = re.search(
-        r"##\s*File\s*List.*?(?=\n#{2,}\s|$)",
-        content,
-        re.DOTALL | re.IGNORECASE,
+    # Extract File List section using shared utility
+    from bmad_assist.compiler.source_context import (
+        _extract_file_list_section,
+        extract_file_paths_from_section,
     )
-    if not file_list_match:
-        logger.info(
-            "No '## File List' section found in %s, skipping DV code review",
-            story_file.name,
-        )
+
+    file_list_content = _extract_file_list_section(content)
+    if not file_list_content:
+        logger.info("No File List section found in %s", story_file.name)
         return []
 
-    # Extract file paths from bullet points
-    # Primary: backtick-wrapped paths (e.g., "- `cmd/relay/main.go` (new) - description")
-    # Fallback: first path-like token without backticks (e.g., "- src/main.py - description")
-    file_list_content = file_list_match.group()
-    file_paths = re.findall(r"[-*]\s+`([^`\n]+)`", file_list_content, re.MULTILINE)
-    if not file_paths:
-        # Fallback: extract first token that looks like a file path
-        file_paths = re.findall(
-            r"[-*]\s+(\S+\.\w+)", file_list_content, re.MULTILINE
-        )
+    # Extract file paths (handles bullets, numbered, tables)
+    file_paths = extract_file_paths_from_section(file_list_content)
 
-    # Filter out module dependencies (e.g., "github.com/go-chi/chi/v5 v5.2.5")
-    # and markdown artifacts (e.g., "*Status: ready-for-dev*")
+    # DV-specific filtering (keep existing logic)
     file_paths = [
         p for p in file_paths
         if not _MODULE_DEP_PATTERN.match(p.strip())
@@ -334,6 +399,11 @@ def _resolve_code_files(
         )
         return []
 
+    # Stack-aware file filter (excludes tests, configs, binaries, etc.)
+    from bmad_assist.deep_verify.file_filter import DVFileFilter
+
+    file_filter = DVFileFilter.for_project(project_path)
+
     # Resolve and validate each file
     resolved: list[tuple[Path, str]] = []
     total_size = 0
@@ -345,6 +415,11 @@ def _resolve_code_files(
     for file_path_str in file_paths:
         file_path_str = file_path_str.strip()
         if not file_path_str:
+            continue
+
+        # Stack-aware exclusion (tests, configs, binaries, etc.)
+        if file_filter.should_exclude(file_path_str):
+            logger.debug("Excluded by file filter: %s", file_path_str)
             continue
 
         # Resolve relative to project root (not story directory)

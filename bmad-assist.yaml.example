@@ -295,7 +295,7 @@ deep_verify:
   # If not specified, uses global 'helper' provider from providers section
   # Uncomment to override with a different provider for Deep Verify methods
   # provider:
-  #   provider: claude                # Provider name: claude, gemini, kimi
+  #   provider: claude-subprocess     # Provider name: claude-subprocess, claude-sdk, gemini, kimi
   #   model: haiku                    # Model identifier for LLM calls
   #   # model_name: custom-name       # Display name (optional, for logs)
   #   # settings: ~/.claude/custom.json  # Settings file path (optional)
@@ -332,7 +332,7 @@ deep_verify:
 
   # Resource limits to prevent OOM and system instability
   resource_limits:
-    max_artifact_size_bytes: 102400   # 100KB max input size
+    max_artifact_size_bytes: 204800   # 200KB max input size
     max_line_count: 5000              # Max lines in artifact
     max_findings_per_method: 50       # Findings limit per method
     max_total_findings: 200           # Total findings limit
@@ -342,10 +342,10 @@ deep_verify:
   # Always-run methods (foundational)
   method_153_pattern_match:           # Regex pattern matching for vulnerabilities
     enabled: true
-    timeout_seconds: 60
+    timeout_seconds: 90
   method_154_boundary_analysis:       # Edge cases, off-by-one, null checks
     enabled: true
-    timeout_seconds: 60
+    timeout_seconds: 90
 
   # Conditional methods (run based on detected domains)
   method_155_assumption_surfacing:    # Hidden assumptions, race conditions (CONCURRENCY, API)

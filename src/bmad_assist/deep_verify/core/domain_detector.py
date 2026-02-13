@@ -338,14 +338,17 @@ class DomainDetectionItem(BaseModel):
 class DomainDetectionResponse(BaseModel):
     """Expected LLM response structure."""
 
-    domains: list[DomainDetectionItem] = Field(..., min_length=1, max_length=4)
+    domains: list[DomainDetectionItem] = Field(..., max_length=4)
     reasoning: str = Field(..., min_length=10)
     ambiguity: str = Field(default="none")
 
     @field_validator("domains")
     @classmethod
     def filter_low_confidence(cls, v: list[DomainDetectionItem]) -> list[DomainDetectionItem]:
-        """Filter out domains with confidence < 0.3."""
+        """Filter out domains with confidence < 0.3.
+
+        May return empty list — caller falls back to keyword detection.
+        """
         return [d for d in v if d.confidence >= 0.3]
 
     @field_validator("ambiguity")
@@ -549,7 +552,7 @@ class DomainDetector:
         try:
             result = self._call_llm(truncated_text, language_hint)
         except (ProviderTimeoutError, ProviderError, ValueError) as e:
-            logger.warning("Domain detection LLM call failed: %s, using fallback", e)
+            logger.debug("Domain detection LLM returned unusable result: %s, using keyword fallback", e)
             result = self._fallback_keyword_detection(artifact_text)
 
         # Add duration
@@ -689,8 +692,16 @@ class DomainDetector:
                         )
                     )
                 except ValueError:
-                    logger.warning("Unknown domain from LLM: %s", item.name)
+                    logger.debug("Unknown domain from LLM: %s", item.name)
                     continue
+
+            # All domains filtered out (low confidence) — let caller use fallback
+            if not domains:
+                logger.debug(
+                    "LLM returned no domains above confidence threshold, "
+                    "falling back to keyword detection"
+                )
+                raise ValueError("No domains above confidence threshold")
 
             return DomainDetectionResult(
                 domains=domains,
@@ -698,8 +709,10 @@ class DomainDetector:
                 ambiguity=parsed.ambiguity,  # type: ignore[arg-type]
             )
 
+        except ValueError:
+            raise
         except Exception as e:
-            logger.error("Failed to parse LLM response: %s", e)
+            logger.debug("Failed to parse LLM response: %s", e)
             raise ValueError(f"Invalid LLM response format: {e}") from e
 
     # ========================================================================

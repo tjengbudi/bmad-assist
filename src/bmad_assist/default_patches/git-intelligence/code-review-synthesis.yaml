@@ -1,0 +1,17 @@
+# Git intelligence for code-review-synthesis workflow
+# Focus: Implementation context and recent changes
+
+extends: common.yaml
+
+phase_commands:
+  - name: "Recent Implementation Commits"
+    description: "Recent commits since story started"
+    command: "git log --oneline -10"
+
+  - name: "Current Branch Status"
+    description: "Current git branch and status"
+    command: "git status --short"
+
+  - name: "Source Changes for Review"
+    description: "Modified source files (excluding tests)"
+    command: "git diff --name-only -- '*.py' '*.js' '*.ts' '*.go' '*.rs'"

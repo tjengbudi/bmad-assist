@@ -14,7 +14,10 @@ from pathlib import Path
 from typing import TYPE_CHECKING
 
 if TYPE_CHECKING:
-    from bmad_assist.deep_verify.core.types import DeepVerifyValidationResult, Finding
+    from bmad_assist.deep_verify.core.types import (
+        DeepVerifyValidationResult,
+        Finding,
+    )
 
 logger = logging.getLogger(__name__)
 
@@ -86,6 +89,161 @@ def save_deep_verify_report(
         raise
 
     return report_path
+
+
+def save_deep_verify_batch_report(
+    batch_results: dict[Path, DeepVerifyValidationResult],
+    epic: int | str,
+    story: int | str,
+    output_dir: Path,
+    *,
+    phase_type: str | None = None,
+) -> Path:
+    """Save consolidated Deep Verify batch report (one file for all results).
+
+    Produces a single markdown report with:
+    - Overall verdict summary (worst across all files)
+    - Per-file verdict table
+    - Findings grouped by file with details
+
+    Args:
+        batch_results: Dict mapping file_path to DeepVerifyValidationResult.
+        epic: Epic number or name.
+        story: Story number or name.
+        output_dir: Directory to save the report.
+        phase_type: Phase identifier (e.g. "remediation", "code-review").
+
+    Returns:
+        Path to the saved report file.
+
+    """
+    output_dir.mkdir(parents=True, exist_ok=True)
+
+    timestamp = datetime.now(UTC).strftime("%Y%m%d_%H%M%S")
+    if phase_type:
+        filename = f"deep-verify-{epic}-{story}-{phase_type}-{timestamp}.md"
+    else:
+        filename = f"deep-verify-{epic}-{story}-{timestamp}.md"
+    report_path = output_dir / filename
+
+    content = _format_batch_report_content(
+        batch_results, epic, story, phase_type=phase_type,
+    )
+
+    temp_path = report_path.with_suffix(".tmp")
+    try:
+        temp_path.write_text(content, encoding="utf-8")
+        temp_path.rename(report_path)
+        logger.info("Saved Deep Verify report: %s", report_path)
+    except OSError as e:
+        logger.warning("Failed to save Deep Verify report: %s", e)
+        raise
+
+    return report_path
+
+
+def _format_batch_report_content(
+    batch_results: dict[Path, DeepVerifyValidationResult],
+    epic: int | str,
+    story: int | str,
+    *,
+    phase_type: str | None = None,
+) -> str:
+    """Format consolidated batch report content."""
+    from bmad_assist.deep_verify.core.types import VerdictDecision
+
+    # Compute overall stats
+    total_findings = sum(len(r.findings) for r in batch_results.values())
+    total_duration = sum(r.duration_ms for r in batch_results.values())
+
+    worst_verdict: VerdictDecision | None = None
+    min_score = 100.0
+    for result in batch_results.values():
+        min_score = min(min_score, result.score)
+        if worst_verdict is None:
+            worst_verdict = result.verdict
+        elif result.verdict == VerdictDecision.REJECT:
+            worst_verdict = VerdictDecision.REJECT
+        elif (
+            result.verdict == VerdictDecision.UNCERTAIN
+            and worst_verdict == VerdictDecision.ACCEPT
+        ):
+            worst_verdict = VerdictDecision.UNCERTAIN
+
+    if worst_verdict is None:
+        worst_verdict = VerdictDecision.ACCEPT
+
+    lines = [
+        "# Deep Verify Batch Report",
+        "",
+        "---",
+        "",
+        "## Summary",
+        "",
+        f"**Overall Verdict:** {worst_verdict.value}",
+        f"**Score:** {min_score:.1f}",
+        f"**Duration:** {total_duration / 1000:.1f}s",
+        f"**Total Findings:** {total_findings}",
+        f"**Files Analyzed:** {len(batch_results)}",
+        "",
+        "---",
+        "",
+        "## Metadata",
+        "",
+        f"- **Epic:** {epic}",
+        f"- **Story:** {story}",
+        *([ f"- **Phase:** {phase_type}"] if phase_type else []),
+        f"- **Generated:** {datetime.now(UTC).isoformat()}",
+        "",
+        "---",
+        "",
+        "## Per-File Verdicts",
+        "",
+        "| File | Verdict | Score | Findings |",
+        "|---|---|---|---|",
+    ]
+
+    for file_path, result in batch_results.items():
+        lines.append(
+            f"| `{file_path.name}` | {result.verdict.value} "
+            f"| {result.score:.1f} | {len(result.findings)} |"
+        )
+
+    # Per-file findings sections
+    for file_path, result in batch_results.items():
+        if not result.findings:
+            continue
+
+        lines.extend([
+            "",
+            "---",
+            "",
+            f"## {file_path.name}",
+            "",
+            f"**Verdict:** {result.verdict.value} | "
+            f"**Score:** {result.score:.1f} | "
+            f"**Findings:** {len(result.findings)}",
+            "",
+        ])
+
+        lines.append(_format_findings_table(result.findings))
+
+        lines.extend(["", "### Details", ""])
+        for finding in result.findings:
+            lines.append(_format_finding_detail(finding))
+            lines.append("")
+
+    # Files with no findings summary
+    clean_files = [
+        fp.name for fp, r in batch_results.items() if not r.findings
+    ]
+    if clean_files:
+        lines.extend(["", "---", "", "## Clean Files", ""])
+        for name in clean_files:
+            lines.append(f"- `{name}`")
+        lines.append("")
+
+    return "\n".join(lines)
 
 
 def _format_report_content(

@@ -236,10 +236,21 @@ class TestValidateStoryContent:
     def test_boundary_length(self) -> None:
         """Content exactly at MIN_STORY_CONTENT_LENGTH with sections passes."""
         # Build content that's exactly at the boundary
-        sections = "## Story\nContent\n## Acceptance Criteria\nAC\n## Tasks\nTask\n"
+        # Sections must start at beginning of line (valid markdown headings)
+        sections = "\n## Story\nContent\n## Acceptance Criteria\nAC\n## Tasks\nTask\n"
         padding = "x" * (MIN_STORY_CONTENT_LENGTH - len(sections))
         content = padding + sections
         assert len(content) >= MIN_STORY_CONTENT_LENGTH
+        assert _validate_story_content(content) is True
+
+    def test_h3_required_sections(self) -> None:
+        """Story with ### heading level passes validation."""
+        content = (
+            "x" * MIN_STORY_CONTENT_LENGTH
+            + "\n### Story\nAs a user...\n"
+            + "### Acceptance Criteria\n- AC1\n"
+            + "### Tasks\n- Task 1\n"
+        )
         assert _validate_story_content(content) is True
 
 
